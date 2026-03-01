@@ -1,11 +1,13 @@
 import os
 import re
+import sys
+import time
 import requests
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from slugify import slugify
 from dateutil import parser as dateparser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 OUTPUT_DIR = "output"
 POSTS_DIR = os.path.join(OUTPUT_DIR, "_posts")
@@ -14,8 +16,12 @@ ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets", "img", "blog", "posts")
 os.makedirs(POSTS_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; ghost-2-md/1.0)"
+}
 
 def clean_ghost_classes(soup):
+    """Strip Ghost/Koenig CSS classes and data attributes from all tags."""
     for tag in soup.find_all(True):
         if tag.has_attr("class"):
             tag["class"] = [
@@ -24,12 +30,17 @@ def clean_ghost_classes(soup):
             ]
             if not tag["class"]:
                 del tag["class"]
-        if tag.has_attr("data-ghost"):
-            del tag["data-ghost"]
+        for attr in ("data-ghost", "data-kg"):
+            if tag.has_attr(attr):
+                del tag[attr]
     return soup
 
 
 def normalize_headings(soup):
+    """
+    Demote any h1 tags after the first to h2.
+    Ghost posts often have a second h1 inside the article body.
+    """
     h1s = soup.find_all("h1")
     if len(h1s) > 1:
         for h in h1s[1:]:
@@ -37,128 +48,83 @@ def normalize_headings(soup):
     return soup
 
 
-def remove_ghost_footnote_arrows(html):
-    return html.replace("↩︎", "")
+def remove_wayback_toolbar(soup):
+    """
+    Strip the Wayback Machine toolbar injected at the top of archived pages.
+    """
+    for el in soup.find_all(id=re.compile(r"^wm-")):
+        el.decompose()
+    for el in soup.find_all("div", class_=re.compile(r"wb_")):
+        el.decompose()
+    return soup
 
+# ── Images ────────────────────────────────────────────────────────────────────
 
 def download_images(soup, slug):
+    """
+    Download all images in the article and rewrite their src to local paths.
+    Skips images that are already local (e.g. already rewritten on a re-run).
+    """
     post_img_dir = os.path.join(ASSETS_DIR, slug)
     os.makedirs(post_img_dir, exist_ok=True)
 
     for img in soup.find_all("img"):
         src = img.get("src")
-        if not src:
+        if not src or src.startswith("/assets"):
             continue
 
+        # Wayback Machine wraps image URLs — unwrap them
+        src = re.sub(r"^https?://web\.archive\.org/web/\d+im_/", "", src)
+
         try:
-            response = requests.get(src)
+            response = requests.get(src, headers=HEADERS, timeout=15)
             response.raise_for_status()
 
-            filename = os.path.basename(urlparse(src).path)
+            filename = os.path.basename(urlparse(src).path) or "image"
+            # Avoid filename collisions from different paths with same basename
             local_path = os.path.join(post_img_dir, filename)
-
             with open(local_path, "wb") as f:
                 f.write(response.content)
 
             img["src"] = f"/assets/img/blog/posts/{slug}/{filename}"
         except Exception as e:
-            print(f"Failed to download {src}: {e}")
+            print(f"  ⚠ Image download failed ({src}): {e}")
 
     return soup
 
-
-def extract_metadata(soup):
-    title_tag = soup.find("h1")
-    title = title_tag.get_text(strip=True) if title_tag else "Untitled"
-
-    date_meta = soup.find("meta", property="article:published_time")
-    date_str = date_meta["content"] if date_meta else None
-    date = dateparser.parse(date_str).date() if date_str else None
-
-    tags = []
-    for tag_meta in soup.find_all("meta", property="article:tag"):
-        tags.append(tag_meta["content"])
-
-    return title, date, tags
-
-
-def build_front_matter(title, date, tags):
-    fm = "---\n"
-    fm += "layout: post\n"
-    fm += f'title: "{title}"\n'
-    fm += f"date: {date}\n"
-    if tags:
-        fm += "tags:\n"
-        for t in tags:
-            fm += f"  - {t}\n"
-    fm += "---\n\n"
-    return fm
-
-
-def process_url(url):
-    print(f"Processing: {url}")
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    title, date, tags = extract_metadata(soup)
-
-    article = soup.find("section", class_=re.compile("gh-content"))
-    if not article:
-        print("No content section found.")
-        return
-
-    slug = slugify(title)
-    article = clean_ghost_classes(article)
-    article = normalize_headings(article)
-    article = download_images(article, slug)
-    article, md_footnotes = convert_footnotes(article)
-
-    html_content = str(article)
-
-    markdown = md(html_content, heading_style="ATX")
-    
-    filename = f"{date}-{slug}.md"
-    filepath = os.path.join(POSTS_DIR, filename)
-
-    if os.path.exists(filepath):
-        print(f"Skipping existing: {filename}")
-        return
-
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(build_front_matter(title, date, tags))
-        f.write(markdown)
-        f.write(md_footnotes)
-
-    print(f"Saved: {filepath}")
+# ── Footnotes ─────────────────────────────────────────────────────────────────
 
 def convert_footnotes(soup):
+    """
+    Convert Ghost/HTML footnotes to Markdown footnote syntax [^n].
+    Returns (soup, footnote_markdown_string).
+    """
     footnote_section = soup.find("div", class_="footnotes")
     if not footnote_section:
         return soup, ""
 
+    # Collect footnote text by id, stripping the back-link arrow
     original_notes = {}
     for li in footnote_section.find_all("li"):
         fn_id = li.get("id")
         if not fn_id:
             continue
-
-        for a in li.find_all("a"):
+        for a in li.find_all("a", string=re.compile(r"↩")):
             a.decompose()
-
         original_notes[fn_id] = li.get_text(strip=True)
 
+    # Walk inline citations in document order
     citation_order = []
     for sup in soup.find_all("sup"):
         a = sup.find("a")
         if not a:
             continue
-
-        href = a.get("href", "").replace("#", "")
+        href = a.get("href", "").lstrip("#")
         if href in original_notes:
             if href not in citation_order:
                 citation_order.append(href)
-            new_index = citation_order.index(href) + 1
-            sup.replace_with(f"[^{new_index}]")
+            idx = citation_order.index(href) + 1
+            sup.replace_with(f"[^{idx}]")
 
     footnote_section.decompose()
 
@@ -170,14 +136,155 @@ def convert_footnotes(soup):
     return soup, md_footnotes
 
 
+# ── Metadata ──────────────────────────────────────────────────────────────────
+
+def extract_metadata(soup):
+    """
+    Pull title, publish date, description, and tags from Open Graph / meta tags.
+    Falls back to the first h1 for the title if OG tags are absent.
+    """
+    # Title: prefer OG, fall back to first h1
+    og_title = soup.find("meta", property="og:title")
+    title = og_title["content"] if og_title else None
+    if not title:
+        h1 = soup.find("h1")
+        title = h1.get_text(strip=True) if h1 else "Untitled"
+
+    # Date
+    date_meta = (
+        soup.find("meta", property="article:published_time")
+        or soup.find("meta", {"name": "published_time"})
+    )
+    date = None
+    if date_meta and date_meta.get("content"):
+        try:
+            date = dateparser.parse(date_meta["content"]).date()
+        except Exception:
+            pass
+
+    # Description
+    desc_meta = (
+        soup.find("meta", property="og:description")
+        or soup.find("meta", {"name": "description"})
+    )
+    description = desc_meta["content"].strip() if desc_meta and desc_meta.get("content") else ""
+
+    # Tags
+    tags = [m["content"] for m in soup.find_all("meta", property="article:tag") if m.get("content")]
+
+    # Cover image (og:image)
+    og_image = soup.find("meta", property="og:image")
+    cover = og_image["content"] if og_image and og_image.get("content") else ""
+
+    return title, date, description, tags, cover
+
+
+def build_front_matter(title, date, description, tags, cover):
+    """Emit a Jekyll-compatible YAML front matter block."""
+    # Escape any quotes in the title
+    safe_title = title.replace('"', '\\"')
+    lines = [
+        "---",
+        "layout: post",
+        f'title: "{safe_title}"',
+    ]
+    if date:
+        lines.append(f"date: {date} 00:00:00 +0000")
+    if description:
+        safe_desc = description.replace('"', '\\"')
+        lines.append(f'description: "{safe_desc}"')
+    if cover:
+        lines.append(f"image:\n  path: {cover}")
+    if tags:
+        lines.append("tags:")
+        for t in tags:
+            lines.append(f"  - {slugify(t)}")
+        lines.append("categories:")
+        lines.append(f"  - {slugify(tags[0])}")
+    lines.append("---\n")
+    return "\n".join(lines) + "\n"
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+
+def fetch(url, retries=3, delay=2):
+    """GET with simple retry logic for Wayback Machine rate limiting."""
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=20)
+            r.raise_for_status()
+            return r
+        except requests.RequestException as e:
+            if attempt < retries - 1:
+                print(f"  Retrying ({attempt + 1}/{retries - 1})…")
+                time.sleep(delay * (attempt + 1))
+            else:
+                raise e
+
+def process_url(url):
+    print(f"\n→ {url}")
+    try:
+        response = fetch(url)
+    except Exception as e:
+        print(f"  ✗ Failed to fetch: {e}")
+        return
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    soup = remove_wayback_toolbar(soup)
+
+    title, date, description, tags, cover = extract_metadata(soup)
+
+    # Ghost stores the article in a <section> with a gh-content class
+    article = soup.find("section", class_=re.compile("gh-content"))
+    if not article:
+        # Fallback: try <article> or <main>
+        article = soup.find("article") or soup.find("main")
+    if not article:
+        print("  ✗ No article content found — skipping.")
+        return
+
+    slug = slugify(title)
+    date_prefix = str(date) if date else "0000-00-00"
+    filename = f"{date_prefix}-{slug}.md"
+    filepath = os.path.join(POSTS_DIR, filename)
+
+    if os.path.exists(filepath):
+        print(f"  ↷ Already exists, skipping: {filename}")
+        return
+
+    article = clean_ghost_classes(article)
+    article = normalize_headings(article)
+    article = download_images(article, slug)
+    article, md_footnotes = convert_footnotes(article)
+
+    markdown = md(str(article), heading_style="ATX", bullets="-")
+    front_matter = build_front_matter(title, date, description, tags, cover)
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(front_matter)
+        f.write(markdown)
+        if md_footnotes.strip():
+            f.write(md_footnotes)
+
+    print(f"  ✓ Saved: {filename}")
 
 def main():
-    with open("urls.txt") as f:
-        urls = [line.strip() for line in f if line.strip()]
+    urls_file = sys.argv[1] if len(sys.argv) > 1 else "urls.txt"
 
+    if not os.path.exists(urls_file):
+        print(f"Error: '{urls_file}' not found.")
+        sys.exit(1)
+
+    with open(urls_file) as f:
+        urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    if not urls:
+        print("No URLs to process.")
+        sys.exit(0)
+
+    print(f"Processing {len(urls)} URL(s)…")
     for url in urls:
         process_url(url)
-
+    print("\nDone.")
 
 if __name__ == "__main__":
     main()
