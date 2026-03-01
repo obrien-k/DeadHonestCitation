@@ -1,32 +1,63 @@
-# Ghost-2-Jekyll v1
+# ghost-2-md
 
-Deterministic migration tool for converting archived Ghost blog posts
-(from Wayback Machine) into Jekyll-compatible Markdown posts.
+Convert archived Ghost posts (via Wayback Machine) into Jekyll-compatible Markdown — deterministically, without touching the text.
 
-## Features
+## What it does
 
-- Extracts title, publish date, tags
-- Converts HTML → Markdown
-- Converts Ghost footnotes to native Markdown footnotes
-- Downloads images locally
-- Removes Ghost-specific classes
-- Normalizes duplicate H1 tags
-- Converts tables to Markdown
-- Preserves content fidelity (no text edits)
+- Fetches archived Ghost posts from Wayback Machine URLs
+- Extracts title, date, description, tags, and cover image from meta tags
+- Converts HTML → Markdown (headings, links, tables, code blocks)
+- Converts Ghost footnotes → native Markdown footnote syntax `[^1]`
+- Downloads and localizes all post images
+- Strips Ghost/Koenig CSS classes and Wayback toolbar injection
+- Normalizes duplicate `<h1>` tags inside article bodies
+- Skips already-processed posts (safe to re-run)
+- Retries failed Wayback Machine fetches automatically
+
+## Output
+
+```
+output/
+  _posts/         # YYYY-MM-DD-slug.md files, ready for Jekyll
+  assets/img/posts/  # Downloaded images, organized by post slug
+```
+
+## Setup
+
+```bash
+python -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
 ## Usage
 
-1. Create `urls.txt` with one Wayback URL per line.
-2. Activate virtual environment.
-3. Run: python index.py
-
-Output is written to:
+1. Add one Wayback Machine URL per line to `urls.txt`:
 
 ```
-output/_posts/
-output/assets/img/blog/posts/
+# Lines starting with # are ignored
+https://web.archive.org/web/20240412181457/https://kyleo.io/some-post/
+https://web.archive.org/web/20230101000000/https://kyleo.io/another-post/
 ```
 
-## Version
+2. Run:
 
-v1.0 — Stable manual URL migration
+```bash
+python index.py
+```
+
+Or pass a different URL file as an argument:
+
+```bash
+python index.py my-other-urls.txt
+```
+
+## Notes
+
+- Use Wayback Machine URLs, not live Ghost URLs — the script expects Ghost's HTML structure and Open Graph meta tags as archived
+- Image downloads may fail for URLs that were never crawled by the Wayback Machine; the script will warn and continue
+- The `output/` directory is gitignored by default — copy results into your Jekyll repo manually
+
+## Requirements
+
+Python 3.8+. See `requirements.txt` for pinned dependencies.
