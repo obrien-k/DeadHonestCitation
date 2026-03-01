@@ -1,4 +1,4 @@
-README.md# Ghost Archive Migrator (v1.0)
+# Ghost-2-Jekyll v1
 
 Deterministic migration tool for converting archived Ghost blog posts
 (from Wayback Machine) into Jekyll-compatible Markdown posts.
