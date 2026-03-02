@@ -12,6 +12,11 @@ from urllib.parse import urlparse
 OUTPUT_DIR = "output"
 POSTS_DIR = os.path.join(OUTPUT_DIR, "_posts")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets", "img", "blog", "posts")
+WAYBACK_RE = re.compile(r"https?://web\.archive\.org/web/\d+(?:im_)?/(.+)")
+
+def unwrap_wayback(url):
+    m = WAYBACK_RE.match(url)
+    return m.group(1) if m else url
 
 os.makedirs(POSTS_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -59,6 +64,35 @@ def remove_wayback_toolbar(soup):
     return soup
 
 # ── Images ────────────────────────────────────────────────────────────────────
+
+def download_image(url, post_img_dir):
+    """Download a single image to post_img_dir. Returns the local path, or None on failure."""
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        filename = os.path.basename(urlparse(url).path) or "image"
+        local_path = os.path.join(post_img_dir, filename)
+        with open(local_path, "wb") as f:
+            f.write(response.content)
+        return local_path
+    except Exception as e:
+        print(f"  ⚠ Image download failed ({url}): {e}")
+        return None
+
+
+def download_cover(cover_url, slug):
+    """Download the cover image and return its local asset path, or the original URL on failure."""
+    if not cover_url:
+        return ""
+    original_url = unwrap_wayback(cover_url)
+    post_img_dir = os.path.join(ASSETS_DIR, slug)
+    os.makedirs(post_img_dir, exist_ok=True)
+    local_path = download_image(original_url, post_img_dir)
+    if local_path:
+        filename = os.path.basename(local_path)
+        return f"/assets/img/blog/posts/{slug}/{filename}"
+    return original_url
+
 
 def download_images(soup, slug):
     """
@@ -172,9 +206,9 @@ def extract_metadata(soup):
     # Tags
     tags = [m["content"] for m in soup.find_all("meta", property="article:tag") if m.get("content")]
 
-    # Cover image (og:image)
-    og_image = soup.find("meta", property="og:image")
-    cover = og_image["content"] if og_image and og_image.get("content") else ""
+    # Cover image URL
+    cover_meta = soup.find("meta", property="og:image")
+    cover = cover_meta["content"] if cover_meta and cover_meta.get("content") else ""
 
     return title, date, description, tags, cover
 
@@ -231,6 +265,11 @@ def process_url(url):
     soup = BeautifulSoup(response.text, "html.parser")
     soup = remove_wayback_toolbar(soup)
 
+    for a in soup.find_all("a", href=True):
+        a["href"] = unwrap_wayback(a["href"])
+    for img in soup.find_all("img", src=True):
+        img["src"] = unwrap_wayback(img["src"])
+
     title, date, description, tags, cover = extract_metadata(soup)
 
     # Ghost stores the article in a <section> with a gh-content class
@@ -243,6 +282,7 @@ def process_url(url):
         return
 
     slug = slugify(title)
+    local_cover = download_cover(cover, slug)
     date_prefix = str(date) if date else "0000-00-00"
     filename = f"{date_prefix}-{slug}.md"
     filepath = os.path.join(POSTS_DIR, filename)
@@ -257,7 +297,7 @@ def process_url(url):
     article, md_footnotes = convert_footnotes(article)
 
     markdown = md(str(article), heading_style="ATX", bullets="-")
-    front_matter = build_front_matter(title, date, description, tags, cover)
+    front_matter = build_front_matter(title, date, description, tags, local_cover)
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(front_matter)
