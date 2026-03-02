@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 OUTPUT_DIR = "output"
 POSTS_DIR = os.path.join(OUTPUT_DIR, "_posts")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets", "img", "blog", "posts")
-WAYBACK_RE = re.compile(r"https?://web\.archive\.org/web/\d+(?:im_)?/(.+)")
+WAYBACK_RE = re.compile(r"(?:https?://web\.archive\.org)?/web/\d+(?:im_)?/(https?://.+)")
 
 def unwrap_wayback(url):
     m = WAYBACK_RE.match(url)
@@ -81,17 +81,34 @@ def download_image(url, post_img_dir):
 
 
 def download_cover(cover_url, slug):
-    """Download the cover image and return its local asset path, or the original URL on failure."""
+    """Download the cover image and return its local asset path, or '' on failure."""
     if not cover_url:
         return ""
-    original_url = unwrap_wayback(cover_url)
     post_img_dir = os.path.join(ASSETS_DIR, slug)
     os.makedirs(post_img_dir, exist_ok=True)
-    local_path = download_image(original_url, post_img_dir)
-    if local_path:
-        filename = os.path.basename(local_path)
-        return f"/assets/img/blog/posts/{slug}/{filename}"
-    return original_url
+
+    if cover_url.startswith("/web/"):
+        cover_url = "https://web.archive.org" + cover_url
+
+    m = WAYBACK_RE.match(cover_url)
+    if m:
+        ts_match = re.match(r"(?:https?://web\.archive\.org)?/web/(\d+)", cover_url)
+        timestamp = ts_match.group(1) if ts_match else ""
+        original = m.group(1)
+        candidates = (
+            [f"https://web.archive.org/web/{timestamp}im_/{original}", original]
+            if timestamp else [cover_url, original]
+        )
+    else:
+        candidates = [cover_url]
+
+    for url in candidates:
+        local_path = download_image(url, post_img_dir)
+        if local_path:
+            filename = os.path.basename(local_path)
+            return f"/assets/img/blog/posts/{slug}/{filename}"
+
+    return ""
 
 
 def download_images(soup, slug):
@@ -107,22 +124,28 @@ def download_images(soup, slug):
         if not src or src.startswith("/assets"):
             continue
 
-        # Wayback Machine wraps image URLs — unwrap them
-        src = re.sub(r"^https?://web\.archive\.org/web/\d+im_/", "", src)
+        # Normalize relative Wayback paths (/web/TIMESTAMP/...) to full URLs
+        if src.startswith("/web/"):
+            src = "https://web.archive.org" + src
 
-        try:
-            response = requests.get(src, headers=HEADERS, timeout=15)
-            response.raise_for_status()
+        m = WAYBACK_RE.match(src)
+        if m:
+            original = m.group(1)
+            ts_match = re.match(r"(?:https?://web\.archive\.org)?/web/(\d+)", src)
+            timestamp = ts_match.group(1) if ts_match else ""
+            candidates = (
+                [f"https://web.archive.org/web/{timestamp}im_/{original}", original]
+                if timestamp else [src, original]
+            )
+        else:
+            candidates = [src]
 
-            filename = os.path.basename(urlparse(src).path) or "image"
-            # Avoid filename collisions from different paths with same basename
-            local_path = os.path.join(post_img_dir, filename)
-            with open(local_path, "wb") as f:
-                f.write(response.content)
-
-            img["src"] = f"/assets/img/blog/posts/{slug}/{filename}"
-        except Exception as e:
-            print(f"  ⚠ Image download failed ({src}): {e}")
+        for url in candidates:
+            local_path = download_image(url, post_img_dir)
+            if local_path:
+                filename = os.path.basename(local_path)
+                img["src"] = f"/assets/img/blog/posts/{slug}/{filename}"
+                break
 
     return soup
 
@@ -206,9 +229,16 @@ def extract_metadata(soup):
     # Tags
     tags = [m["content"] for m in soup.find_all("meta", property="article:tag") if m.get("content")]
 
-    # Cover image URL
-    cover_meta = soup.find("meta", property="og:image")
-    cover = cover_meta["content"] if cover_meta and cover_meta.get("content") else ""
+    # Cover image: first <figure> outside the article body (Ghost puts the feature
+    # image in the article header, never inside gh-content)
+    cover = ""
+    for figure in soup.find_all("figure"):
+        if figure.find_parent("section", class_=re.compile("gh-content")):
+            continue
+        img = figure.find("img")
+        if img and img.get("src"):
+            cover = img["src"]
+            break
 
     return title, date, description, tags, cover
 
@@ -265,12 +295,13 @@ def process_url(url):
     soup = BeautifulSoup(response.text, "html.parser")
     soup = remove_wayback_toolbar(soup)
 
+    # Extract metadata before unwrapping so cover img src retains its Wayback timestamp
+    title, date, description, tags, cover = extract_metadata(soup)
+
     for a in soup.find_all("a", href=True):
         a["href"] = unwrap_wayback(a["href"])
     for img in soup.find_all("img", src=True):
         img["src"] = unwrap_wayback(img["src"])
-
-    title, date, description, tags, cover = extract_metadata(soup)
 
     # Ghost stores the article in a <section> with a gh-content class
     article = soup.find("section", class_=re.compile("gh-content"))

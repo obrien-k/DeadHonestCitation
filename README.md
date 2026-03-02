@@ -19,7 +19,7 @@ Convert archived Ghost posts (via Wayback Machine) into Jekyll-compatible Markdo
 ```
 output/
   _posts/         # YYYY-MM-DD-slug.md files, ready for Jekyll
-  assets/img/posts/  # Downloaded images, organized by post slug
+  assets/img/blog/posts/  # Downloaded images, organized by post slug
 ```
 
 ## Setup
