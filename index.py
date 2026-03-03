@@ -328,6 +328,12 @@ def process_url(url):
     article, md_footnotes = convert_footnotes(article)
 
     markdown = md(str(article), heading_style="ATX", bullets="-")
+    # Escape | inside link text to prevent Jekyll from interpreting it as table syntax
+    markdown = re.sub(
+        r'\[([^\]]*\|[^\]]*)\]',
+        lambda m: '[' + m.group(1).replace('|', r'\|') + ']',
+        markdown
+    )
     front_matter = build_front_matter(title, date, description, tags, local_cover)
 
     with open(filepath, "w", encoding="utf-8") as f:
