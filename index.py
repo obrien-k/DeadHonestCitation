@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import time
+import argparse
 import requests
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
@@ -50,6 +51,24 @@ def normalize_headings(soup):
     if len(h1s) > 1:
         for h in h1s[1:]:
             h.name = "h2"
+    return soup
+
+
+def clean_wordpress_cruft(soup):
+    """
+    Strip yaaburnee theme chrome that lives inside .post-content: Kiwi social
+    share bars, related-article blocks, and any leftover scripts/styles. Harmless
+    on Ghost content, which has none of these.
+    """
+    for selector in ("kiwi-article-bar", "related-articles", "related-articles-group",
+                     "related-articles-title", "related-post"):
+        for el in soup.find_all(class_=selector):
+            el.decompose()
+    # Any other Kiwi social-share widget variants
+    for el in soup.find_all(class_=re.compile(r"\bkiwi-")):
+        el.decompose()
+    for el in soup.find_all(["script", "style", "noscript", "ins"]):
+        el.decompose()
     return soup
 
 
@@ -195,14 +214,15 @@ def convert_footnotes(soup):
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
 
-def extract_metadata(soup):
+def extract_metadata_ghost(soup):
     """
-    Pull title, publish date, description, and tags from Open Graph / meta tags.
-    Falls back to the first h1 for the title if OG tags are absent.
+    Ghost: title, date, description, and tags come from Open Graph / meta tags;
+    the cover is the first <figure> outside the gh-content body. Categories are
+    left empty so build_front_matter() derives one from the first tag.
     """
-    # Title: prefer OG, fall back to first h1
+    # Title: OG → first h1
     og_title = soup.find("meta", property="og:title")
-    title = og_title["content"] if og_title else None
+    title = og_title["content"].strip() if og_title and og_title.get("content") else None
     if not title:
         h1 = soup.find("h1")
         title = h1.get_text(strip=True) if h1 else "Untitled"
@@ -219,12 +239,14 @@ def extract_metadata(soup):
         except Exception:
             pass
 
-    # Description
-    desc_meta = (
-        soup.find("meta", property="og:description")
-        or soup.find("meta", {"name": "description"})
-    )
-    description = desc_meta["content"].strip() if desc_meta and desc_meta.get("content") else ""
+    # Description: OG → meta description
+    og_desc = soup.find("meta", property="og:description")
+    desc_meta = soup.find("meta", {"name": "description"})
+    description = ""
+    if og_desc and og_desc.get("content"):
+        description = og_desc["content"].strip()
+    elif desc_meta and desc_meta.get("content"):
+        description = desc_meta["content"].strip()
 
     # Tags
     tags = [m["content"] for m in soup.find_all("meta", property="article:tag") if m.get("content")]
@@ -240,10 +262,132 @@ def extract_metadata(soup):
             cover = img["src"]
             break
 
-    return title, date, description, tags, cover
+    return title, date, description, tags, cover, []
 
 
-def build_front_matter(title, date, description, tags, cover):
+def extract_metadata_wordpress(soup):
+    """
+    WordPress (yaaburnee theme): title from .entry-title, date from .post-date
+    (human format, e.g. "March 08, 2018"), tags from the tag-* classes on the
+    <article> wrapper, and categories from the post's <span class="post-category">
+    badge inside .entry-meta. The theme emits no per-post <meta> description, so it
+    is left empty here and derived from the first body paragraph in process_url().
+    """
+    # Title: .entry-title → first h1
+    title = None
+    entry_title = soup.find(class_="entry-title")
+    if entry_title:
+        title = entry_title.get_text(strip=True)
+    if not title:
+        h1 = soup.find("h1")
+        title = h1.get_text(strip=True) if h1 else "Untitled"
+
+    # Date: .post-date (human format)
+    date = None
+    post_date = soup.find(class_="post-date")
+    if post_date:
+        try:
+            date = dateparser.parse(post_date.get_text(strip=True)).date()
+        except Exception:
+            pass
+
+    # Tags: tag-* classes on the <article> wrapper
+    tags = []
+    article_el = soup.find("article")
+    if article_el and article_el.has_attr("class"):
+        tags = [c[len("tag-"):] for c in article_el["class"] if c.startswith("tag-")]
+
+    # Categories: the main post's category badge lives in
+    # <div class="entry-meta"><span class="post-category"> — the standalone
+    # <div class="post-category"> blocks belong to related-article cards.
+    # Organizational-only categories are dropped.
+    CATEGORY_NOISE = {"uncategorized", "in-response"}
+    categories = []
+    entry_meta = soup.find("div", class_="entry-meta")
+    cat_block = entry_meta.find("span", class_="post-category") if entry_meta else None
+    if cat_block:
+        categories = [
+            a.get_text(strip=True) for a in cat_block.find_all("a")
+            if a.get_text(strip=True) and slugify(a.get_text(strip=True)) not in CATEGORY_NOISE
+        ]
+
+    # The theme has no per-post cover; body images are kept inline instead.
+    return title, date, "", tags, "", categories
+
+
+def clean_content_ghost(article):
+    """Cleaning pipeline for Ghost article bodies."""
+    article = clean_ghost_classes(article)
+    article = normalize_headings(article)
+    return article
+
+
+def clean_content_wordpress(article):
+    """Cleaning pipeline for yaaburnee WordPress article bodies."""
+    article = clean_wordpress_cruft(article)
+    article = clean_ghost_classes(article)  # harmless; drops any stray gh-/kg- classes
+    article = normalize_headings(article)
+    return article
+
+
+def detect_ghost(soup):
+    """True if the page looks like a Ghost export."""
+    if soup.find("section", class_=re.compile("gh-content")):
+        return True
+    gen = soup.find("meta", attrs={"name": "generator"})
+    return bool(gen and gen.get("content", "").lower().startswith("ghost"))
+
+
+def detect_wordpress(soup):
+    """True if the page looks like a (yaaburnee-themed) WordPress export."""
+    if soup.find("div", class_="post-content") and soup.find("div", class_="entry-meta"):
+        return True
+    gen = soup.find("meta", attrs={"name": "generator"})
+    if gen and "wordpress" in gen.get("content", "").lower():
+        return True
+    # wp-content asset paths are a strong WordPress signal
+    return bool(soup.find(href=re.compile(r"/wp-content/")) or soup.find(src=re.compile(r"/wp-content/")))
+
+
+# Platform adapters: each registers how to detect the platform, find metadata,
+# locate the article body, and clean it. Adding a new platform/theme means adding
+# one entry here (and an extract/clean/detect function); auto-detection and the
+# --platform flag pick it up automatically.
+PLATFORMS = {
+    "ghost": {
+        "detect": detect_ghost,
+        "extract_metadata": extract_metadata_ghost,
+        "content": ("section", {"class": re.compile("gh-content")}),
+        "clean": clean_content_ghost,
+    },
+    "wordpress": {
+        "detect": detect_wordpress,
+        "extract_metadata": extract_metadata_wordpress,
+        "content": ("div", {"class": "post-content"}),
+        "clean": clean_content_wordpress,
+    },
+}
+
+# Friendly aliases accepted on the command line.
+PLATFORM_ALIASES = {
+    "gh": "ghost",
+    "wp": "wordpress",
+    "yaaburnee": "wordpress",
+}
+
+
+def detect_platform(soup):
+    """
+    Sniff the source platform from the page markup. Returns a PLATFORMS key, or
+    None if no adapter recognizes the page (caller should ask for --platform).
+    """
+    for name, adapter in PLATFORMS.items():
+        if adapter["detect"](soup):
+            return name
+    return None
+
+
+def build_front_matter(title, date, description, tags, cover, categories=None):
     """Emit a Jekyll-compatible YAML front matter block."""
     # Escape any quotes in the title
     safe_title = title.replace('"', '\\"')
@@ -263,8 +407,13 @@ def build_front_matter(title, date, description, tags, cover):
         lines.append("tags:")
         for t in tags:
             lines.append(f"  - {slugify(t)}")
+    # Categories: prefer explicit ones (WordPress), else fall back to the first tag
+    if not categories and tags:
+        categories = [tags[0]]
+    if categories:
         lines.append("categories:")
-        lines.append(f"  - {slugify(tags[0])}")
+        for c in categories:
+            lines.append(f"  - {slugify(c)}")
     lines.append("---\n")
     return "\n".join(lines) + "\n"
 
@@ -284,7 +433,8 @@ def fetch(url, retries=3, delay=2):
             else:
                 raise e
 
-def process_url(url):
+def process_url(url, platform=None):
+    """Convert one archived URL. If platform is None, auto-detect it from the markup."""
     print(f"\n→ {url}")
     try:
         response = fetch(url)
@@ -295,22 +445,43 @@ def process_url(url):
     soup = BeautifulSoup(response.text, "html.parser")
     soup = remove_wayback_toolbar(soup)
 
+    resolved = platform or detect_platform(soup)
+    if resolved is None:
+        print("  ✗ Could not detect platform — re-run with --platform; skipping.")
+        return
+    if not platform:
+        print(f"  · detected platform: {resolved}")
+    adapter = PLATFORMS[resolved]
+
     # Extract metadata before unwrapping so cover img src retains its Wayback timestamp
-    title, date, description, tags, cover = extract_metadata(soup)
+    title, date, description, tags, cover, categories = adapter["extract_metadata"](soup)
 
     for a in soup.find_all("a", href=True):
         a["href"] = unwrap_wayback(a["href"])
-    for img in soup.find_all("img", src=True):
-        img["src"] = unwrap_wayback(img["src"])
+    # Note: image src is left as the Wayback URL so download_images() can fetch the
+    # archived copy (the original domain may be dead); it rewrites src on success.
 
-    # Ghost stores the article in a <section> with a gh-content class
-    article = soup.find("section", class_=re.compile("gh-content"))
-    if not article:
-        # Fallback: try <article> or <main>
-        article = soup.find("article") or soup.find("main")
+    # Locate the article body using the platform's content selector, falling back
+    # to a generic <article>/<main> if the themed wrapper is absent.
+    name, attrs = adapter["content"]
+    article = soup.find(name, attrs) or soup.find("article") or soup.find("main")
     if not article:
         print("  ✗ No article content found — skipping.")
         return
+
+    article = adapter["clean"](article)
+
+    # When the platform supplied no description, derive one from the first paragraph
+    if not description:
+        first_p = article.find("p")
+        if first_p:
+            # separator=" " keeps words apart where inline tags (links) sit between them
+            text = first_p.get_text(" ", strip=True)
+            text = re.sub(r"\s+", " ", text)            # collapse runs of whitespace
+            text = re.sub(r"\s+([,.;:!?])", r"\1", text)  # no space before punctuation
+            if len(text) > 160:
+                text = text[:160].rsplit(" ", 1)[0] + "…"
+            description = text
 
     slug = slugify(title)
     local_cover = download_cover(cover, slug)
@@ -322,8 +493,6 @@ def process_url(url):
         print(f"  ↷ Already exists, skipping: {filename}")
         return
 
-    article = clean_ghost_classes(article)
-    article = normalize_headings(article)
     article = download_images(article, slug)
     article, md_footnotes = convert_footnotes(article)
 
@@ -334,7 +503,7 @@ def process_url(url):
         lambda m: '[' + m.group(1).replace('|', r'\|') + ']',
         markdown
     )
-    front_matter = build_front_matter(title, date, description, tags, local_cover)
+    front_matter = build_front_matter(title, date, description, tags, local_cover, categories)
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(front_matter)
@@ -345,22 +514,45 @@ def process_url(url):
     print(f"  ✓ Saved: {filename}")
 
 def main():
-    urls_file = sys.argv[1] if len(sys.argv) > 1 else "urls.txt"
+    parser = argparse.ArgumentParser(
+        description="Convert archived blog posts (Wayback Machine URLs) into Jekyll Markdown."
+    )
+    parser.add_argument(
+        "urls_file", nargs="?", default="urls.txt",
+        help="File of URLs to process, one per line (default: urls.txt)",
+    )
+    parser.add_argument(
+        "--platform", "-p", default=None,
+        choices=sorted(set(PLATFORMS) | set(PLATFORM_ALIASES)),
+        help="Force the source platform / theme instead of auto-detecting. "
+             "Accepts: ghost (gh), wordpress (wp, yaaburnee).",
+    )
+    # Convenience flags equivalent to --platform <name>
+    parser.add_argument("--ghost", dest="platform", action="store_const", const="ghost",
+                        help="Shorthand for --platform ghost")
+    parser.add_argument("--wordpress", "--yaaburnee", dest="platform",
+                        action="store_const", const="wordpress",
+                        help="Shorthand for --platform wordpress")
+    args = parser.parse_args()
 
-    if not os.path.exists(urls_file):
-        print(f"Error: '{urls_file}' not found.")
+    # None ⇒ auto-detect per URL from the page markup
+    platform = PLATFORM_ALIASES.get(args.platform, args.platform)
+
+    if not os.path.exists(args.urls_file):
+        print(f"Error: '{args.urls_file}' not found.")
         sys.exit(1)
 
-    with open(urls_file) as f:
+    with open(args.urls_file) as f:
         urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
     if not urls:
         print("No URLs to process.")
         sys.exit(0)
 
-    print(f"Processing {len(urls)} URL(s)…")
+    mode = f"as '{platform}'" if platform else "auto-detecting platform"
+    print(f"Processing {len(urls)} URL(s), {mode}…")
     for url in urls:
-        process_url(url)
+        process_url(url, platform)
     print("\nDone.")
 
 if __name__ == "__main__":
