@@ -3,3 +3,4 @@ __pycache__/
 output/
 urls.txt
 .DS_Store
+.claude/
