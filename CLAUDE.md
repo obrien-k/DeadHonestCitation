@@ -33,6 +33,12 @@ python to_jekyll.py menu                               # interactive: list draft
 # Guided interactive flow: pick source → convert → review each → stage/promote
 python wizard.py
 
+# Extract structured data from archived archive-lineage page pages (releases,
+# editions/format/lossless, weighted contributors, comments) → normalized JSON.
+# Renames to this project domain language (Release/Edition) as it extracts; no PII beyond
+# what the page shows. Reference/wireframe tooling, separate from the post pipeline.
+python extractor.py path/to/*.htm -o corpus.json
+
 # Output housekeeping
 python index.py --clean        # delete all of output/ (prompts; -y to skip the prompt)
 python index.py --prune        # drop stale output (older slug dupes, orphaned asset folders)
