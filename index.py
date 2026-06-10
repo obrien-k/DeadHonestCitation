@@ -4,8 +4,11 @@ import sys
 import glob
 import time
 import shutil
+import zipfile
+import tempfile
 import argparse
 import requests
+from xml.etree import ElementTree as ET
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from slugify import slugify
@@ -243,6 +246,91 @@ def copy_local_image(src, base_dir, post_img_dir):
     except OSError as e:
         print(f"  ⚠ Local image copy failed ({candidate}): {e}")
         return None
+
+# ── Word (.docx) ──────────────────────────────────────────────────────────────
+
+def _esc(s):
+    """Minimal HTML-attribute escaping for values we inject into the <head>."""
+    return (s.replace("&", "&amp;").replace('"', "&quot;")
+             .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def read_docx_core_props(path):
+    """
+    Pull (title, author, created) from a .docx's docProps/core.xml. Each is "" when
+    absent. Word leaves dc:title empty unless the author set Document Properties, so
+    the title usually has to come from the first heading instead (handled downstream).
+    """
+    title = author = created = ""
+    try:
+        with zipfile.ZipFile(path) as z:
+            data = z.read("docProps/core.xml")
+    except (KeyError, zipfile.BadZipFile, OSError):
+        return title, author, created
+    ns = {"dc": "http://purl.org/dc/elements/1.1/",
+          "dcterms": "http://purl.org/dc/terms/"}
+    try:
+        root = ET.fromstring(data)
+    except ET.ParseError:
+        return title, author, created
+
+    def txt(tag):
+        el = root.find(tag, ns)
+        return el.text.strip() if el is not None and el.text else ""
+
+    return txt("dc:title"), txt("dc:creator"), txt("dcterms:created")
+
+
+def _docx_image_handler(out_dir):
+    """mammoth image handler: write each embedded image into out_dir/media/ and
+    reference it by a relative path, so download_images() copies it like any other
+    local-export asset (no network)."""
+    media_dir = os.path.join(out_dir, "media")
+    os.makedirs(media_dir, exist_ok=True)
+    counter = {"n": 0}
+
+    def handle(image):
+        counter["n"] += 1
+        ext = (image.content_type or "image/png").split("/")[-1].lower()
+        ext = {"jpeg": "jpg", "x-emf": "emf", "x-wmf": "wmf"}.get(ext, ext)
+        rel = f"media/image{counter['n']}.{ext}"
+        with image.open() as src, open(os.path.join(out_dir, rel), "wb") as dst:
+            dst.write(src.read())
+        return {"src": rel}
+
+    return handle
+
+
+def docx_to_html(path):
+    """
+    Convert a .docx into the same shape the rest of the pipeline expects from a saved
+    HTML page: a full document whose <head> carries the Word core properties as meta
+    tags (so the docx adapter reads them like any CMS) and whose <body> wraps the
+    converted content in <article>. Embedded images are extracted to a temp dir, which
+    is returned as base_dir so download_images() copies them locally. Returns
+    (html, base_dir).
+    """
+    import mammoth  # lazy: only needed for .docx, keeps the dep optional otherwise
+
+    out_dir = tempfile.mkdtemp(prefix="ghost2md-docx-")
+    with open(path, "rb") as f:
+        result = mammoth.convert_to_html(
+            f, convert_image=mammoth.images.img_element(_docx_image_handler(out_dir))
+        )
+    body = result.value
+
+    title, author, created = read_docx_core_props(path)
+    meta = ['<meta name="generator" content="docx (ghost-2-md)">']
+    if title:
+        meta.append(f'<meta property="og:title" content="{_esc(title)}">')
+    if author:
+        meta.append(f'<meta name="author" content="{_esc(author)}">')
+    if created:
+        meta.append(f'<meta property="article:published_time" content="{_esc(created)}">')
+    head = "".join(meta)
+    html = f"<html><head>{head}</head><body><article>{body}</article></body></html>"
+    return html, out_dir
+
 
 # ── Footnotes ─────────────────────────────────────────────────────────────────
 
@@ -570,6 +658,29 @@ def clean_content_generic(article):
     return article
 
 
+def clean_content_docx(article):
+    """
+    Cleaning pipeline for Word-converted bodies. Drops the leading heading (it
+    becomes the front-matter title, so keeping it duplicates the title in the body)
+    and the empty bookmark anchors (<a id="_Hlk…"></a>) Word/mammoth leave behind.
+    """
+    first_heading = article.find(["h1", "h2", "h3"])
+    if first_heading:
+        first_heading.decompose()
+    for a in article.find_all("a"):
+        # Empty, hrefless anchors are Word bookmarks — pure noise. Drop them.
+        if not a.get("href") and not a.get_text(strip=True) and not a.find("img"):
+            a.decompose()
+    article = normalize_headings(article)
+    return article
+
+
+def detect_docx(soup):
+    """True for the wrapped HTML docx_to_html() produces (marker generator meta)."""
+    gen = soup.find("meta", attrs={"name": "generator"})
+    return bool(gen and "docx" in gen.get("content", "").lower())
+
+
 def detect_ghost(soup):
     """True if the page looks like a Ghost export."""
     if soup.find("section", class_=re.compile("gh-content")):
@@ -615,6 +726,15 @@ PLATFORMS = {
         ],
         "clean": clean_content_wordpress,
     },
+    # Word documents. docx_to_html() converts the .docx to HTML up front and tags it
+    # with a marker meta, so detection is exact; metadata comes from the Word core
+    # properties we inject as og/meta tags (extract_metadata_generic reads them).
+    "docx": {
+        "detect": detect_docx,
+        "extract_metadata": extract_metadata_generic,
+        "content": ("article", {}),
+        "clean": clean_content_docx,
+    },
     # Last-resort adapter for arbitrary HTML (e.g. a locally saved page from an
     # unknown CMS). Opt-in only — detect() returns False so it never shadows a real
     # platform during auto-detection; select it with --platform generic / --html.
@@ -638,6 +758,8 @@ PLATFORM_ALIASES = {
     "wp": "wordpress",
     "yaaburnee": "wordpress",
     "html": "generic",
+    "doc": "docx",
+    "word": "docx",
 }
 
 
@@ -699,11 +821,15 @@ def fetch(url, retries=3, delay=2):
                 raise e
 
 
+# Local file extensions the pipeline can read directly (a saved page or a Word doc).
+SOURCE_EXTS = (".html", ".htm", ".docx")
+
+
 def is_local_source(src):
     """True if src is a local HTML file to read rather than a URL to fetch."""
     if src.startswith(("http://", "https://")):
         return False
-    return src.lower().endswith((".html", ".htm")) or os.path.exists(os.path.expanduser(src))
+    return src.lower().endswith(SOURCE_EXTS) or os.path.exists(os.path.expanduser(src))
 
 
 def load_source(src):
@@ -714,9 +840,80 @@ def load_source(src):
     """
     if is_local_source(src):
         path = os.path.expanduser(src)
+        if path.lower().endswith(".docx"):
+            return docx_to_html(path)
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read(), os.path.dirname(os.path.abspath(path))
     return fetch(src).text, None
+
+
+def _dir_sources(directory, recursive):
+    """Every page source (*.html/*.htm/*.docx) inside a directory, sorted.
+
+    Saved-page asset folders ('<name>_files/') and dotfiles are skipped — they hold
+    images, not pages. With recursive, walk subdirectories too (still pruning any
+    '*_files' tree and hidden dirs)."""
+    found = []
+    if recursive:
+        for root, dirs, files in os.walk(directory):
+            dirs[:] = [d for d in dirs if not d.endswith("_files") and not d.startswith(".")]
+            for name in files:
+                if name.lower().endswith(SOURCE_EXTS) and not name.startswith("."):
+                    found.append(os.path.join(root, name))
+    else:
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            if not name.startswith(".") and os.path.isfile(path) and name.lower().endswith(SOURCE_EXTS):
+                found.append(path)
+    return sorted(found)
+
+
+def collect_sources(tokens, recursive=False):
+    """Resolve CLI source tokens into a flat, de-duplicated work list.
+
+    Each token is classified independently, so one run can mix input kinds:
+      - a directory            → every *.html/*.htm/*.docx inside (recursive opt-in)
+      - a URL (http/https)     → itself
+      - a *.html/*.htm/*.docx  → itself (one saved page or Word doc)
+      - any other existing file → a *list file*: read it, one source per non-blank,
+                                  non-'#' line (the classic urls.txt)
+      - anything else          → reported missing and skipped
+    This is the input-agnostic seam: the adapter registry is untouched; we only
+    decide *what to feed it*."""
+    sources = []
+    for token in tokens:
+        token = token.strip()
+        if not token:
+            continue
+        expanded = os.path.expanduser(token)
+        if os.path.isdir(expanded):
+            hits = _dir_sources(expanded, recursive)
+            if not hits:
+                print(f"  ⚠ no .html/.htm/.docx files in directory: {token}")
+            sources.extend(hits)
+        elif token.startswith(("http://", "https://")):
+            sources.append(token)
+        elif token.lower().endswith(SOURCE_EXTS):
+            # A non-URL .html/.htm/.docx token is a local page; it must exist.
+            if os.path.isfile(expanded):
+                sources.append(expanded)
+            else:
+                print(f"  ⚠ source not found, skipping: {token}")
+        elif os.path.isfile(expanded):
+            with open(expanded, encoding="utf-8", errors="replace") as f:
+                sources.extend(
+                    ln.strip() for ln in f
+                    if ln.strip() and not ln.lstrip().startswith("#")
+                )
+        else:
+            print(f"  ⚠ source not found, skipping: {token}")
+    # De-duplicate while preserving first-seen order.
+    seen, unique = set(), []
+    for s in sources:
+        if s not in seen:
+            seen.add(s)
+            unique.append(s)
+    return unique
 
 
 def process_url(url, platform=None):
@@ -875,14 +1072,21 @@ def prune_output():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Convert archived blog posts into Jekyll Markdown. Each input line "
-                    "is a Wayback/live URL or a path to a locally saved HTML file "
-                    "(its sibling '<name>_files/' folder supplies images)."
+        description="Convert archived blog posts into Jekyll Markdown. A source is a "
+                    "Wayback/live URL, a saved HTML page or Word .docx (its sibling "
+                    "'<name>_files/' folder supplies images), a directory of those, or "
+                    "a list-file of any of the above one per line."
     )
     parser.add_argument(
-        "urls_file", nargs="?", default="urls.txt",
-        help="File of sources to process, one URL or local HTML path per line "
-             "(default: urls.txt)",
+        "sources", nargs="*", default=["urls.txt"],
+        help="One or more sources: a directory (every .html/.htm/.docx inside), a "
+             "saved page (.html/.htm), a Word doc (.docx), a Wayback/live URL, or a "
+             "list-file of any of those one per line (default: urls.txt).",
+    )
+    parser.add_argument(
+        "-r", "--recursive", action="store_true",
+        help="When a source is a directory, recurse into subdirectories "
+             "(skips saved-page '<name>_files/' asset folders).",
     )
     parser.add_argument(
         "--platform", "-p", default=None,
@@ -899,6 +1103,9 @@ def main():
     parser.add_argument("--generic", "--html", dest="platform", action="store_const",
                         const="generic",
                         help="Shorthand for --platform generic (arbitrary HTML pages)")
+    parser.add_argument("--docx", "--word", dest="platform", action="store_const",
+                        const="docx",
+                        help="Shorthand for --platform docx (Word .docx files)")
     parser.add_argument("--clean", action="store_true",
                         help="Delete all generated output (posts + assets) and exit.")
     parser.add_argument("--prune", action="store_true",
@@ -915,24 +1122,18 @@ def main():
         prune_output()
         return
 
-    # None ⇒ auto-detect per URL from the page markup
+    # None ⇒ auto-detect per source from the page markup
     platform = PLATFORM_ALIASES.get(args.platform, args.platform)
 
-    if not os.path.exists(args.urls_file):
-        print(f"Error: '{args.urls_file}' not found.")
-        sys.exit(1)
-
-    with open(args.urls_file) as f:
-        urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-
-    if not urls:
-        print("No URLs to process.")
+    sources = collect_sources(args.sources, recursive=args.recursive)
+    if not sources:
+        print("No sources to process.")
         sys.exit(0)
 
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
-    print(f"Processing {len(urls)} URL(s), {mode}…")
-    for url in urls:
-        process_url(url, platform)
+    print(f"Processing {len(sources)} source(s), {mode}…")
+    for src in sources:
+        process_url(src, platform)
     print("\nDone.")
 
 if __name__ == "__main__":
