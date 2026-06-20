@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Windows-1252 punctuation (curly quotes, dashes, ellipsis) on pages served as
+  `text/html` with no charset is no longer mis-decoded into C1 control characters.
+  `requests` falls back to ISO-8859-1 for such pages, turning byte `0x92` (’) into
+  `U+0092` — invisible mojibake that also made YAML front matter unparseable
+  (`control characters are not allowed`). `fix_cp1252_controls()` remaps the
+  `0x80–0x9F` range before parsing; it's a no-op on correctly-decoded UTF-8.
+
 ## [0.2.0] - 2026-06-20
 
 Two-sided generalization (pluggable output as well as input), provenance-stamped
