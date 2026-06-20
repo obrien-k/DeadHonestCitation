@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Renamed the project to DeadHonestCitation.** GitHub repo
+  `obrien-k/ghost-2-jekyll` → `obrien-k/DeadHonestCitation` (old URLs redirect).
+  Environment variables `ARCHIVE2MD_*` → `DHC_*` (update your `.env`). The docx
+  generator marker is now `content="docx (DeadHonestCitation)"`; `detect_docx`
+  keys on the `docx` substring, so previously-converted files still round-trip.
+- Moved the design doc to `docs/DESIGN.md`.
+
 ## [0.2.0] - 2026-06-20
 
 Two-sided generalization (pluggable output as well as input), provenance-stamped
@@ -62,5 +72,6 @@ First public-ready release: a platform-agnostic archive→Markdown converter.
 - Image and cover downloads from the Wayback Machine (prefers `im_` raw captures).
 - Escape `|` in Markdown link text so kramdown doesn't misread it as a table.
 
-[0.2.0]: https://github.com/obrien-k/ghost-2-jekyll/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/obrien-k/ghost-2-jekyll/releases/tag/v0.1.0
+[Unreleased]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/obrien-k/DeadHonestCitation/releases/tag/v0.1.0

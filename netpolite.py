@@ -6,8 +6,8 @@ other host: a global minimum interval between requests, Retry-After handling, an
 exponential backoff. Sequential by design, so concurrency is naturally bounded at 1.
 
 Tunable via the environment:
-  ARCHIVE2MD_MIN_INTERVAL   seconds between requests (default 0.5)
-  ARCHIVE2MD_MAX_RETRIES    attempts before giving up (default 4)
+  DHC_MIN_INTERVAL   seconds between requests (default 0.5)
+  DHC_MAX_RETRIES    attempts before giving up (default 4)
 """
 
 import os
@@ -15,11 +15,11 @@ import time
 
 import requests
 
-USER_AGENT = "archive-2-md/0.1 (+https://github.com/obrien-k/ghost-2-jekyll)"
+USER_AGENT = "dead-honest-citation/0.1 (+https://github.com/obrien-k/DeadHonestCitation)"
 HEADERS = {"User-Agent": USER_AGENT}
 
-MIN_INTERVAL = float(os.environ.get("ARCHIVE2MD_MIN_INTERVAL", "0.5"))
-MAX_RETRIES = int(os.environ.get("ARCHIVE2MD_MAX_RETRIES", "4"))
+MIN_INTERVAL = float(os.environ.get("DHC_MIN_INTERVAL", "0.5"))
+MAX_RETRIES = int(os.environ.get("DHC_MAX_RETRIES", "4"))
 MAX_BACKOFF = 60.0
 
 _last_request = 0.0

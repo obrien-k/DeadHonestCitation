@@ -9,8 +9,8 @@ Move converted posts from this tool's output/ into a Jekyll site repo.
            post's own front matter. This is the "trickle a draft into _posts" step.
 
 The Jekyll repo path and the injected source tag default from the environment —
-set ARCHIVE2MD_JEKYLL_REPO and ARCHIVE2MD_SOURCE_TAG, or drop them in a .env file
-at the repo root (see .env.example). --repo / --tag override either.
+set DHC_JEKYLL_REPO and DHC_SOURCE_TAG, or drop them in a .env file at the repo
+root (see .env.example). --repo / --tag override either.
 
 Examples:
   python to_jekyll.py stage output/_posts/2018-*.md        # stage to _drafts
@@ -47,8 +47,8 @@ _load_dotenv()
 
 # Personal defaults live in the environment / .env, not in the source. Fall back to
 # neutral placeholders so a fresh clone runs without leaking anyone's paths or tags.
-DEFAULT_REPO = os.path.expanduser(os.environ.get("ARCHIVE2MD_JEKYLL_REPO") or "~/jekyll-site")
-DEFAULT_TAG = os.environ.get("ARCHIVE2MD_SOURCE_TAG", "")
+DEFAULT_REPO = os.path.expanduser(os.environ.get("DHC_JEKYLL_REPO") or "~/jekyll-site")
+DEFAULT_TAG = os.environ.get("DHC_SOURCE_TAG", "")
 ASSETS_REL = os.path.join("assets", "img", "blog", "posts")
 OUT_POSTS = os.path.join("output", "_posts")
 OUT_ASSETS = os.path.join("output", ASSETS_REL)
@@ -214,7 +214,7 @@ def main():
     s.add_argument(
         "--tag",
         default=DEFAULT_TAG,
-        help="Source tag to inject (default: $ARCHIVE2MD_SOURCE_TAG, "
+        help="Source tag to inject (default: $DHC_SOURCE_TAG, "
         f'currently {DEFAULT_TAG!r}; "" to skip).',
     )
     s.add_argument(

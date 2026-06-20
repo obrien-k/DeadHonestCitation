@@ -47,7 +47,7 @@ python discover.py --recover myoldforum              # recover an unknown host b
 python discover.py --save https://example.com/page/  # Save Page Now → archive permalink
 
 # Move converted posts into the Jekyll repo (repo + source tag come from
-# $ARCHIVE2MD_JEKYLL_REPO / $ARCHIVE2MD_SOURCE_TAG or .env; --repo/--tag override)
+# $DHC_JEKYLL_REPO / $DHC_SOURCE_TAG or .env; --repo/--tag override)
 python to_jekyll.py stage output/_posts/2018-*.md      # → _drafts/<slug>.md (+source tag, +assets)
 python to_jekyll.py stage --to-posts output/_posts/<f> # → _posts/<date>-<slug>.md directly
 python to_jekyll.py promote <slug>                     # _drafts/<slug>.md → _posts/<date>-<slug>.md
@@ -88,7 +88,7 @@ Supporting scripts: `discover.py` finds Wayback URLs (enumerate a domain / `--re
 
 **Embeds / plugins** — `convert_embeds()` runs before markdownify (which silently drops `<iframe>`/`<embed>`/`<object>`). YouTube/Vimeo become labeled Markdown links; ad/Flash (`.swf`) junk is dropped; any other embed is kept as a best-effort link **and** recorded as a `⚠ NEEDS REVIEW` note, as are WordPress shortcodes (`[gallery]`, `[embed]`, …). The guiding principle: convert generic WP themes to plugin-free Markdown, preserve embeds that add personality, and surface anything needing manual attention rather than dropping it silently.
 
-`extract_metadata_docx` reads what `docx_to_html()` planted: the `.docx`'s `docProps/core.xml` (title, author, created date) is read by `read_docx_core_props()` and written into `<meta>` tags plus a `content="docx (ghost-2-md)"` generator marker, so the docx adapter (`detect_docx`) recognizes the wrapped HTML and reads metadata like any other CMS. Embedded images are extracted to a temp dir during the mammoth conversion (`_docx_image_handler`). `mammoth` is imported lazily inside `docx_to_html()`, so the dependency is only required when actually converting a `.docx`.
+`extract_metadata_docx` reads what `docx_to_html()` planted: the `.docx`'s `docProps/core.xml` (title, author, created date) is read by `read_docx_core_props()` and written into `<meta>` tags plus a `content="docx (DeadHonestCitation)"` generator marker, so the docx adapter (`detect_docx`) recognizes the wrapped HTML and reads metadata like any other CMS. Embedded images are extracted to a temp dir during the mammoth conversion (`_docx_image_handler`). `mammoth` is imported lazily inside `docx_to_html()`, so the dependency is only required when actually converting a `.docx`.
 
 **ProBoards / thread content model** — forum threads are conversations, not articles. `proboards` has no `<article>` (its `content` selector is the whole `<body>`); `clean_content_proboards` rebuilds the table-soup into attributed blocks — `**author** — date` + the message as a blockquote — keying on the 20%/80% `windowbg`/`windowbg2` post cells, the `« Reply #N on <date> »` header, and the `<hr>` message boundary. `kind` is `thread`.
 
@@ -96,7 +96,7 @@ Supporting scripts: `discover.py` finds Wayback URLs (enumerate a domain / `--re
 
 **Capture tier** — `process_url()` inspects `Content-Type` up front; a non-markup URL (PDF/image/zip/…) is preserved by `capture_binary()` (saves the bytes as an asset + emits a record/citation, `kind` from the type) rather than forced through the article pipeline. The invariant: every source ends `converted`, `captured`, `skipped`, or `failed` — never silently dropped.
 
-**Polite HTTP + run-log** — all network I/O goes through `netpolite.polite_get()`: a global minimum interval between requests, `Retry-After` handling on 429/503, and exponential backoff on connection errors (tunable via `ARCHIVE2MD_MIN_INTERVAL`/`_MAX_RETRIES`). `process_url`/`process_markdown` return an outcome dict; `main()` appends each to `output/runlog.jsonl` (append-only coverage log) and prints a run summary.
+**Polite HTTP + run-log** — all network I/O goes through `netpolite.polite_get()`: a global minimum interval between requests, `Retry-After` handling on 429/503, and exponential backoff on connection errors (tunable via `DHC_MIN_INTERVAL`/`_MAX_RETRIES`). `process_url`/`process_markdown` return an outcome dict; `main()` appends each to `output/runlog.jsonl` (append-only coverage log) and prints a run summary.
 
 **Processing pipeline** — `main()` resolves tokens via `collect_sources()`, the platform (`--platform`/shorthands, else auto-detected), and the target (`--target`). For each source `process_url()` (or `process_markdown()` for `.md`/`.txt`):
 1. Loads the source — URLs via `polite_get()` (non-markup → `capture_binary()`); local files via `load_source()` (HTML, or `.docx` → `docx_to_html()`)
