@@ -142,44 +142,46 @@ def download_image(url, post_img_dir):
         return None
 
 
-def download_cover(cover_url, slug):
-    """Download the cover image and return its local asset path, or '' on failure."""
+def download_cover(cover_url, slug, target=None):
+    """Download the cover image and return its in-document URL, or '' on failure."""
     if not cover_url:
         return ""
-    post_img_dir = os.path.join(ASSETS_DIR, slug)
+    target = target or resolve_target(None)
+    post_img_dir = os.path.join(OUTPUT_DIR, target["asset_dir"](slug))
     os.makedirs(post_img_dir, exist_ok=True)
 
     for url in wayback_image_candidates(cover_url):
         local_path = download_image(url, post_img_dir)
         if local_path:
-            filename = os.path.basename(local_path)
-            return f"/assets/img/blog/posts/{slug}/{filename}"
+            return target["asset_url"](slug, os.path.basename(local_path))
 
     return ""
 
 
-def download_images(soup, slug, base_dir=None):
+def download_images(soup, slug, base_dir=None, target=None):
     """
     Download (or, for a local HTML export, copy) all images in the article and
-    rewrite their src to local asset paths. Skips images already localized.
+    rewrite their src to the active target's asset URLs. Skips already-localized ones.
 
     base_dir, when set, is the directory of a saved HTML file; images whose src is
     a relative path are copied straight out of its sibling "<name>_files/" folder
     instead of being fetched over the network.
     """
-    post_img_dir = os.path.join(ASSETS_DIR, slug)
+    target = target or resolve_target(None)
+    post_img_dir = os.path.join(OUTPUT_DIR, target["asset_dir"](slug))
     os.makedirs(post_img_dir, exist_ok=True)
+    asset_root = target["asset_url"](slug, "")
 
     for img in soup.find_all("img"):
         src = img.get("src")
-        if not src or src.startswith("/assets"):
+        if not src or src.startswith(asset_root):
             continue
 
         # 1. Local export: copy from the saved files-dir when src resolves on disk.
         if base_dir and not src.startswith(("http://", "https://", "//", "/web/")):
             copied = copy_local_image(src, base_dir, post_img_dir)
             if copied:
-                img["src"] = f"/assets/img/blog/posts/{slug}/{os.path.basename(copied)}"
+                img["src"] = target["asset_url"](slug, os.path.basename(copied))
                 continue
             # else fall through: the local file is missing (a cross-origin asset the
             # browser never fetched), so try the real URLs in srcset / data-* below.
@@ -191,7 +193,7 @@ def download_images(soup, slug, base_dir=None):
             for url in wayback_image_candidates(candidate):
                 local_path = download_image(url, post_img_dir)
                 if local_path:
-                    img["src"] = f"/assets/img/blog/posts/{slug}/{os.path.basename(local_path)}"
+                    img["src"] = target["asset_url"](slug, os.path.basename(local_path))
                     localized = True
                     break
             if localized:
@@ -804,9 +806,14 @@ def detect_platform(soup):
     return None
 
 
-def build_front_matter(title, date, description, tags, cover, categories=None):
-    """Emit a Jekyll-compatible YAML front matter block."""
-    # Escape any quotes in the title
+def build_front_matter(meta):
+    """Jekyll-compatible YAML front matter from a metadata dict (the jekyll target)."""
+    title = meta["title"]
+    date = meta.get("date")
+    description = meta.get("description")
+    tags = meta.get("tags") or []
+    cover = meta.get("cover")
+    categories = meta.get("categories")
     safe_title = title.replace('"', '\\"')
     lines = [
         "---",
@@ -833,6 +840,78 @@ def build_front_matter(title, date, description, tags, cover, categories=None):
             lines.append(f"  - {slugify(c)}")
     lines.append("---\n")
     return "\n".join(lines) + "\n"
+
+
+# ── Output targets ────────────────────────────────────────────────────────────
+# An output target decides how a converted post is written: front-matter format,
+# file naming/layout, asset paths, and any Markdown-flavor tweaks. The conversion
+# core stays target-agnostic (it produces metadata + body + assets), so supporting
+# another static-site generator means adding one TARGETS entry. Each supplies:
+#   doc_relpath(slug, date) → path (under OUTPUT_DIR) for the document file
+#   asset_dir(slug)         → dir  (under OUTPUT_DIR) holding that post's images
+#   asset_url(slug, fname)  → the in-document URL for a localized image
+#   front_matter(meta)      → the front-matter block
+#   flavor(markdown)        → post-process the Markdown body
+
+
+def escape_table_pipes(markdown):
+    """Escape | inside link text so kramdown/GFM won't read it as table syntax."""
+    return re.sub(
+        r"\[([^\]]*\|[^\]]*)\]",
+        lambda m: "[" + m.group(1).replace("|", r"\|") + "]",
+        markdown,
+    )
+
+
+def commonmark_front_matter(meta):
+    """Minimal, SSG-neutral YAML front matter (no Jekyll-specific keys)."""
+    safe_title = meta["title"].replace('"', '\\"')
+    lines = ["---", f'title: "{safe_title}"']
+    if meta.get("date"):
+        lines.append(f"date: {meta['date']}")
+    if meta.get("description"):
+        safe_desc = meta["description"].replace('"', '\\"')
+        lines.append(f'description: "{safe_desc}"')
+    if meta.get("tags"):
+        lines.append("tags:")
+        for t in meta["tags"]:
+            lines.append(f"  - {slugify(t)}")
+    lines.append("---\n")
+    return "\n".join(lines) + "\n"
+
+
+TARGETS = {
+    "jekyll": {
+        "doc_relpath": lambda slug, date: os.path.join(
+            "_posts", f"{date or '0000-00-00'}-{slug}.md"
+        ),
+        "asset_dir": lambda slug: os.path.join("assets", "img", "blog", "posts", slug),
+        "asset_url": lambda slug, fname: f"/assets/img/blog/posts/{slug}/{fname}",
+        "front_matter": build_front_matter,
+        "flavor": escape_table_pipes,
+    },
+    "commonmark": {
+        "doc_relpath": lambda slug, date: f"{slug}.md",
+        "asset_dir": lambda slug: os.path.join("assets", slug),
+        "asset_url": lambda slug, fname: f"assets/{slug}/{fname}",
+        "front_matter": commonmark_front_matter,
+        "flavor": escape_table_pipes,
+    },
+}
+
+TARGET_ALIASES = {
+    "jekyll": "jekyll",
+    "jk": "jekyll",
+    "commonmark": "commonmark",
+    "cm": "commonmark",
+    "plain": "commonmark",
+    "md": "commonmark",
+}
+
+
+def resolve_target(name):
+    """Map a target name/alias to its TARGETS entry (defaults to jekyll)."""
+    return TARGETS[TARGET_ALIASES.get(name or "jekyll", name or "jekyll")]
 
 
 # ── Core ──────────────────────────────────────────────────────────────────────
@@ -951,9 +1030,11 @@ def collect_sources(tokens, recursive=False):
     return unique
 
 
-def process_url(url, platform=None):
+def process_url(url, platform=None, target=None):
     """Convert one source — a Wayback/live URL or a local HTML file. If platform is
-    None, auto-detect it from the markup."""
+    None, auto-detect it from the markup. target selects the output format/layout
+    (defaults to jekyll)."""
+    tgt = resolve_target(target)
     print(f"\n→ {url}")
     try:
         html, base_dir = load_source(url)
@@ -1011,24 +1092,20 @@ def process_url(url, platform=None):
             description = text
 
     slug = slugify(title)
-    local_cover = download_cover(cover, slug)
-    date_prefix = str(date) if date else "0000-00-00"
-    filename = f"{date_prefix}-{slug}.md"
-    filepath = os.path.join(POSTS_DIR, filename)
+    local_cover = download_cover(cover, slug, tgt)
+    doc_relpath = tgt["doc_relpath"](slug, str(date) if date else None)
+    filepath = os.path.join(OUTPUT_DIR, doc_relpath)
 
     if os.path.exists(filepath):
-        print(f"  ↷ Already exists, skipping: {filename}")
+        print(f"  ↷ Already exists, skipping: {doc_relpath}")
         return
 
-    article = download_images(article, slug, base_dir)
+    article = download_images(article, slug, base_dir, tgt)
     article, embed_notes = convert_embeds(article, base_dir)
     article, md_footnotes = convert_footnotes(article)
 
     markdown = md(str(article), heading_style="ATX", bullets="-")
-    # Escape | inside link text to prevent Jekyll from interpreting it as table syntax
-    markdown = re.sub(
-        r"\[([^\]]*\|[^\]]*)\]", lambda m: "[" + m.group(1).replace("|", r"\|") + "]", markdown
-    )
+    markdown = tgt["flavor"](markdown)
     # A page with no body (e.g. a homepage/landing template) is not a post — skip it
     # rather than write an empty file. Embed-only posts still pass: convert_embeds()
     # leaves a Markdown link in the body.
@@ -1036,15 +1113,24 @@ def process_url(url, platform=None):
         print("  ✗ No meaningful content — skipping.")
         return
 
-    front_matter = build_front_matter(title, date, description, tags, local_cover, categories)
+    meta = {
+        "title": title,
+        "date": date,
+        "description": description,
+        "tags": tags,
+        "cover": local_cover,
+        "categories": categories,
+    }
+    front_matter = tgt["front_matter"](meta)
 
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(front_matter)
         f.write(markdown)
         if md_footnotes.strip():
             f.write(md_footnotes)
 
-    print(f"  ✓ Saved: {filename}")
+    print(f"  ✓ Saved: {doc_relpath}")
     for note in embed_notes:
         print(f"  ⚠ NEEDS REVIEW: {note}")
 
@@ -1168,6 +1254,14 @@ def main():
         help="Shorthand for --platform docx (Word .docx files)",
     )
     parser.add_argument(
+        "--target",
+        "-t",
+        default="jekyll",
+        choices=sorted(set(TARGETS) | set(TARGET_ALIASES)),
+        help="Output format/layout (default: jekyll). Accepts: jekyll (jk), "
+        "commonmark (cm, plain, md).",
+    )
+    parser.add_argument(
         "--clean",
         action="store_true",
         help="Delete all generated output (posts + assets) and exit.",
@@ -1198,10 +1292,11 @@ def main():
         print("No sources to process.")
         sys.exit(0)
 
+    target = TARGET_ALIASES.get(args.target, args.target)
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
-    print(f"Processing {len(sources)} source(s), {mode}…")
+    print(f"Processing {len(sources)} source(s), {mode}, → {target}…")
     for src in sources:
-        process_url(src, platform)
+        process_url(src, platform, target)
     print("\nDone.")
 
 
