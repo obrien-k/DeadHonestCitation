@@ -1012,6 +1012,7 @@ KIND_BY_PLATFORM = {
     "generic": "page",
     "docx": "document",
     "proboards": "thread",
+    "txt": "document",
 }
 
 CITE_INCLUDE = """{%- comment -%}
@@ -1216,8 +1217,8 @@ def load_source(src):
     return fetch(src).text, None
 
 
-def _dir_sources(directory, recursive):
-    """Every page source (*.html/*.htm/*.docx) inside a directory, sorted.
+def _dir_sources(directory, recursive, exts=SOURCE_EXTS):
+    """Every source file (matching exts) inside a directory, sorted.
 
     Saved-page asset folders ('<name>_files/') and dotfiles are skipped — they hold
     images, not pages. With recursive, walk subdirectories too (still pruning any
@@ -1227,32 +1228,31 @@ def _dir_sources(directory, recursive):
         for root, dirs, files in os.walk(directory):
             dirs[:] = [d for d in dirs if not d.endswith("_files") and not d.startswith(".")]
             for name in files:
-                if name.lower().endswith(SOURCE_EXTS) and not name.startswith("."):
+                if name.lower().endswith(exts) and not name.startswith("."):
                     found.append(os.path.join(root, name))
     else:
         for name in os.listdir(directory):
             path = os.path.join(directory, name)
-            if (
-                not name.startswith(".")
-                and os.path.isfile(path)
-                and name.lower().endswith(SOURCE_EXTS)
-            ):
+            if not name.startswith(".") and os.path.isfile(path) and name.lower().endswith(exts):
                 found.append(path)
     return sorted(found)
 
 
-def collect_sources(tokens, recursive=False):
+def collect_sources(tokens, recursive=False, txt_as_content=False):
     """Resolve CLI source tokens into a flat, de-duplicated work list.
 
     Each token is classified independently, so one run can mix input kinds:
-      - a directory            → every *.html/*.htm/*.docx inside (recursive opt-in)
+      - a directory            → every source file inside (recursive opt-in)
       - a URL (http/https)     → itself
-      - a *.html/*.htm/*.docx  → itself (one saved page or Word doc)
+      - a content file         → itself (.html/.htm/.docx page or Word doc, .md/
+                                  .markdown, and .txt when txt_as_content)
       - any other existing file → a *list file*: read it, one source per non-blank,
-                                  non-'#' line (the classic urls.txt)
+                                  non-'#' line (the classic urls.txt — .txt stays a
+                                  list file unless txt_as_content)
       - anything else          → reported missing and skipped
     This is the input-agnostic seam: the adapter registry is untouched; we only
     decide *what to feed it*."""
+    content_exts = SOURCE_EXTS + MD_EXTS + ((".txt",) if txt_as_content else ())
     sources = []
     for token in tokens:
         token = token.strip()
@@ -1260,14 +1260,14 @@ def collect_sources(tokens, recursive=False):
             continue
         expanded = os.path.expanduser(token)
         if os.path.isdir(expanded):
-            hits = _dir_sources(expanded, recursive)
+            hits = _dir_sources(expanded, recursive, content_exts)
             if not hits:
-                print(f"  ⚠ no .html/.htm/.docx files in directory: {token}")
+                print(f"  ⚠ no source files in directory: {token}")
             sources.extend(hits)
         elif token.startswith(("http://", "https://")):
             sources.append(token)
-        elif token.lower().endswith(SOURCE_EXTS):
-            # A non-URL .html/.htm/.docx token is a local page; it must exist.
+        elif token.lower().endswith(content_exts):
+            # A non-URL content token is a local page/doc/markdown file; it must exist.
             if os.path.isfile(expanded):
                 sources.append(expanded)
             else:
@@ -1286,6 +1286,117 @@ def collect_sources(tokens, recursive=False):
             seen.add(s)
             unique.append(s)
     return unique
+
+
+def _emit_source(tgt, doc_relpath, url, base_dir, platform_name, slug, meta, body, footnotes):
+    """Write one converted source via the active target; return its relpath. Shared by
+    the HTML pipeline (process_url) and the Markdown passthrough (process_markdown)."""
+    if tgt.get("emit"):
+        cite = derive_citation(url, base_dir, platform_name)
+        return tgt["emit"](OUTPUT_DIR, slug, meta, body, footnotes, cite)
+    filepath = os.path.join(OUTPUT_DIR, doc_relpath)
+    front_matter = tgt["front_matter"](meta)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(front_matter)
+        f.write(body)
+        if footnotes.strip():
+            f.write(footnotes)
+    return doc_relpath
+
+
+# ── Markdown / plain-text passthrough ─────────────────────────────────────────
+# Loose .md/.markdown (and .txt under --txt) files are already in the output format,
+# so they skip the HTML round-trip: read the body verbatim, lift title/date/tags from
+# a YAML front-matter block if present (else the first heading or the filename), and
+# emit through the active target. Provenance is 'local' (an author's own file).
+
+MD_EXTS = (".md", ".markdown")
+FM_BLOCK_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
+
+
+def is_markdown_source(src, md_mode=False):
+    """True if a source should be handled as Markdown/plain-text passthrough."""
+    if src.startswith(("http://", "https://")):
+        return False
+    low = src.lower()
+    return low.endswith(MD_EXTS) or (md_mode and low.endswith(".txt"))
+
+
+def _parse_simple_front_matter(text):
+    """Split a leading YAML front-matter block from a Markdown file, lifting
+    title/date/description/tags without a YAML dependency. Returns (meta, body)."""
+    m = FM_BLOCK_RE.match(text)
+    if not m:
+        return {}, text
+    block, body = m.group(1), text[m.end() :]
+    meta = {}
+    mt = re.search(r'^title:\s*["\']?(.*?)["\']?\s*$', block, re.M)
+    if mt:
+        meta["title"] = mt.group(1)
+    dt = re.search(r"^date:\s*(\d{4}-\d{2}-\d{2})", block, re.M)
+    if dt:
+        meta["date"] = dt.group(1)
+    de = re.search(r'^description:\s*["\']?(.*?)["\']?\s*$', block, re.M)
+    if de:
+        meta["description"] = de.group(1)
+    if "tags:" in block:
+        tags = re.findall(r"^\s*-\s*(.+?)\s*$", block[block.index("tags:") :], re.M)
+        if tags:
+            meta["tags"] = tags
+    return meta, body
+
+
+def _first_markdown_heading(body):
+    m = re.search(r"^#{1,6}\s+(.+?)\s*$", body, re.M)
+    return m.group(1).strip() if m else None
+
+
+def process_markdown(path, target=None):
+    """Bring a loose Markdown/plain-text file in as a post/citation, verbatim (no HTML
+    round-trip). Title from front matter, first heading, or filename; provenance local."""
+    tgt = resolve_target(target)
+    print(f"\n→ {path}")
+    expanded = os.path.expanduser(path)
+    try:
+        with open(expanded, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"  ✗ Failed to load: {e}")
+        return
+    meta_in, body = _parse_simple_front_matter(text)
+    body = body.strip("\n")
+    if not body.strip():
+        print("  ✗ Empty file — skipping.")
+        return
+    stem = os.path.splitext(os.path.basename(expanded))[0]
+    title = (
+        meta_in.get("title")
+        or _first_markdown_heading(body)
+        or stem.replace("-", " ").replace("_", " ").strip().title()
+    )
+    description = meta_in.get("description", "")
+    if not description:
+        plain = re.sub(r"^#{1,6}\s+.*$", "", body, flags=re.M)  # drop heading lines
+        plain = re.sub(r"\s+", " ", plain).strip()
+        description = plain[:160].rsplit(" ", 1)[0] + "…" if len(plain) > 160 else plain
+    slug = slugify(title)
+    meta = {
+        "title": title,
+        "date": meta_in.get("date", ""),
+        "description": description,
+        "tags": meta_in.get("tags", []),
+        "cover": "",
+        "categories": [],
+    }
+    doc_relpath = tgt["doc_relpath"](slug, meta["date"] or None)
+    if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
+        print(f"  ↷ Already exists, skipping: {doc_relpath}")
+        return
+    written = _emit_source(
+        tgt, doc_relpath, path, os.path.dirname(expanded), "txt", slug, meta, body + "\n", ""
+    )
+    print(f"  ✓ Saved: {written}")
 
 
 def process_url(url, platform=None, target=None):
@@ -1381,19 +1492,9 @@ def process_url(url, platform=None, target=None):
         "categories": categories,
     }
 
-    if tgt.get("emit"):
-        cite = derive_citation(url, base_dir, resolved)
-        written = tgt["emit"](OUTPUT_DIR, slug, meta, markdown, md_footnotes, cite)
-    else:
-        front_matter = tgt["front_matter"](meta)
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(front_matter)
-            f.write(markdown)
-            if md_footnotes.strip():
-                f.write(md_footnotes)
-        written = doc_relpath
-
+    written = _emit_source(
+        tgt, doc_relpath, url, base_dir, resolved, slug, meta, markdown, md_footnotes
+    )
     print(f"  ✓ Saved: {written}")
     for note in embed_notes:
         print(f"  ⚠ NEEDS REVIEW: {note}")
@@ -1518,6 +1619,14 @@ def main():
         help="Shorthand for --platform docx (Word .docx files)",
     )
     parser.add_argument(
+        "--txt",
+        "--markdown",
+        dest="markdown",
+        action="store_true",
+        help="Treat .txt inputs as Markdown/plain-text content (passthrough) instead "
+        "of as a list-file of sources. (.md/.markdown are always passthrough.)",
+    )
+    parser.add_argument(
         "--target",
         "-t",
         default="jekyll",
@@ -1550,8 +1659,9 @@ def main():
 
     # None ⇒ auto-detect per source from the page markup
     platform = PLATFORM_ALIASES.get(args.platform, args.platform)
+    md_mode = args.markdown
 
-    sources = collect_sources(args.sources, recursive=args.recursive)
+    sources = collect_sources(args.sources, recursive=args.recursive, txt_as_content=md_mode)
     if not sources:
         print("No sources to process.")
         sys.exit(0)
@@ -1560,7 +1670,10 @@ def main():
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
     print(f"Processing {len(sources)} source(s), {mode}, → {target}…")
     for src in sources:
-        process_url(src, platform, target)
+        if is_markdown_source(src, md_mode):
+            process_markdown(src, target)
+        else:
+            process_url(src, platform, target)
     print("\nDone.")
 
 
