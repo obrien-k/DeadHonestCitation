@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-20
+
+Two-sided generalization (pluggable output as well as input), provenance-stamped
+citations, a forum adapter, broader discovery, and a polite network layer.
+
+### Added
+- **Output-target registry** (`TARGETS`) symmetric to the input adapters, selected
+  with `--target`: `jekyll` (default, unchanged), `commonmark`, and `data`.
+- **`data` target** — provenance-stamped citation objects: `_data/sources/<id>.yml`
+  + `_sources/<id>.md` + a plugin-free `_includes/cite.html`. Provenance is honest
+  by construction (`archived` / `live` / `local`).
+- **ProBoards adapter** with a *thread* content model (attributed `author — date`
+  blocks instead of one flattened article).
+- **Markdown/plain-text passthrough** for `.md`/`.markdown` (and `.txt` under `--txt`),
+  emitted verbatim with front matter lifted.
+- **Capture tier** — non-HTML URLs (PDF/image/…) are preserved verbatim rather than
+  dropped; every source ends converted / captured / skipped / failed.
+- **`discover.py`** gains host recovery (`--recover` probes hosting platforms by
+  name) and Save Page Now (`--save`).
+- **Optional screenshots** (`--screenshot`, lazy `playwright`) referenced from
+  citations.
+- **`netpolite.py`** — shared rate-limited HTTP layer (global interval, Retry-After,
+  backoff) used by `index.py` and `discover.py`.
+- **Run-log** — per-source outcomes appended to `output/runlog.jsonl` + a run summary.
+
+### Fixed
+- Decode HTML-encoded `&amp;` in discovered capture URLs so they resolve correctly.
+
 ## [0.1.0] - 2026-06-20
 
 First public-ready release: a platform-agnostic archive→Markdown converter.
@@ -34,4 +62,5 @@ First public-ready release: a platform-agnostic archive→Markdown converter.
 - Image and cover downloads from the Wayback Machine (prefers `im_` raw captures).
 - Escape `|` in Markdown link text so kramdown doesn't misread it as a table.
 
+[0.2.0]: https://github.com/obrien-k/ghost-2-jekyll/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/obrien-k/ghost-2-jekyll/releases/tag/v0.1.0

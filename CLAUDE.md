@@ -32,6 +32,20 @@ python index.py saved-pages.txt --html       # generic adapter (--platform gener
 # embedded images extracted; metadata read from docProps/core.xml
 python index.py draft.docx                   # auto-detected; or force with --docx / --word
 
+# Loose Markdown / plain-text passthrough (verbatim body; front matter lifted)
+python index.py notes.md                     # .md/.markdown always passthrough
+python index.py old.txt --txt                # treat .txt as content, not a list file
+
+# Output format/layout (default jekyll). data = provenance-stamped citation objects
+python index.py urls.txt --target commonmark # aliases: cm, plain, md
+python index.py urls.txt --target data       # → _data/sources/<id>.yml + _sources/<id>.md
+python index.py urls.txt --target data --screenshot  # render each page (needs playwright)
+
+# Discover URLs without knowing them (discover.py): enumerate / recover / save
+python discover.py example.com --contains foo        # enumerate a domain's captures
+python discover.py --recover myoldforum              # recover an unknown host by name
+python discover.py --save https://example.com/page/  # Save Page Now → archive permalink
+
 # Move converted posts into the Jekyll repo (repo + source tag come from
 # $ARCHIVE2MD_JEKYLL_REPO / $ARCHIVE2MD_SOURCE_TAG or .env; --repo/--tag override)
 python to_jekyll.py stage output/_posts/2018-*.md      # → _drafts/<slug>.md (+source tag, +assets)
@@ -45,15 +59,24 @@ python wizard.py
 # Output housekeeping
 python index.py --clean        # delete all of output/ (prompts; -y to skip the prompt)
 python index.py --prune        # drop stale output (older slug dupes, orphaned asset folders)
+
+# Lint / format (Ruff; config in pyproject.toml)
+ruff check .
+ruff format .
 ```
 
-There are no tests or linters configured.
+Linting/formatting use Ruff (`pyproject.toml`). There are no automated tests.
 
 ## Architecture
 
-Single-file script (`index.py`) that converts archived blog posts into Jekyll-compatible Markdown files. Input is a **Wayback Machine/live URL, a local saved HTML file, or a Word `.docx`** (`load_source()` branches on `is_local_source()`; local HTML copies images from the sibling `<name>_files/` dir instead of downloading; `.docx` is converted to HTML up front by `docx_to_html()`). It is **platform-agnostic**: a registry of adapters (`PLATFORMS`) handles each source CMS/theme. Four are built in — `ghost`, `wordpress` (the yaaburnee theme + generalized; aliases `wp`/`yaaburnee`), `generic` (opt-in `--html`/`--platform generic`, for arbitrary pages), and `docx` (Word documents; aliases `doc`/`word`). A companion `to_jekyll.py` stages output into a Jekyll repo's `_drafts/` and promotes drafts into `_posts/` (with an interactive `menu`); `wizard.py` wraps the whole pipeline as a guided flow (pick source → convert → per-post keep/skip/draft/post review → stage → promote). `index.py --clean`/`--prune` handle output housekeeping.
+`index.py` converts archived web pages into Markdown. Input is a **Wayback/live URL, a local saved HTML file, a Word `.docx`, or loose Markdown/`.txt`**; non-HTML URLs (PDF/image/…) are **captured verbatim** instead of dropped. It is **platform-agnostic on both ends** via two symmetric registries:
 
-**Input layer** — `collect_sources(tokens, recursive)` is the input-agnostic seam that resolves the positional CLI tokens into a flat, de-duplicated work list, classifying each token independently so one run can mix kinds: a **directory** expands to every `*.html`/`*.htm`/`*.docx` inside (`_dir_sources()`; recursion opt-in via `--recursive`), an **http(s) URL** is itself, a **`.html`/`.htm`/`.docx` path** is one local page/doc, and any **other existing file** is treated as a *list file* (one source per non-blank, non-`#` line — the classic `urls.txt`). The adapter registry is untouched by this layer; it only decides *what to feed* the per-source pipeline.
+- **Input adapters** (`PLATFORMS`) — recognize and read a source CMS/theme/format. Five are built in: `ghost`, `wordpress` (yaaburnee + generalized; aliases `wp`/`yaaburnee`), `generic` (opt-in `--html`, arbitrary pages), `docx` (Word; aliases `doc`/`word`), and `proboards` (forum threads; aliases `pb`/`forum`).
+- **Output targets** (`TARGETS`) — decide how results are written: `jekyll` (default, back-compat), `commonmark` (aliases `cm`/`plain`/`md`), and `data` (provenance-stamped citation objects; aliases `citation`/`cite`). Selected with `--target`/`-t`.
+
+Supporting scripts: `discover.py` finds Wayback URLs (enumerate a domain / `--recover` an unknown host by name / `--save` via Save Page Now); `netpolite.py` is the shared rate-limited HTTP layer (used by `index.py` and `discover.py`); `to_jekyll.py` stages output into a Jekyll repo's `_drafts/` and promotes to `_posts/` (interactive `menu`); `wizard.py` wraps the pipeline as a guided flow. `index.py --clean`/`--prune` handle output housekeeping.
+
+**Input layer** — `collect_sources(tokens, recursive, txt_as_content)` resolves the positional CLI tokens into a flat, de-duplicated work list, classifying each token independently so one run can mix kinds: a **directory** expands to every source file inside (`_dir_sources()`; recursion via `--recursive`), an **http(s) URL** is itself, a **`.html`/`.htm`/`.docx`/`.md`/`.markdown` path** is one source, and any **other existing file** is a *list file* (one source per non-blank, non-`#` line — the classic `urls.txt`). `.md`/`.markdown` route to the **Markdown passthrough** (`process_markdown`); `.txt` stays a list file unless `--txt` (then it's passthrough content too). The registries are untouched by this layer; it only decides *what to feed* the per-source pipeline.
 
 **Adapters** — each `PLATFORMS[name]` entry supplies four pieces, so adding a CMS/theme means adding one entry plus its functions:
 - `detect(soup)` — recognizes the platform from page markup (used by `detect_platform()`)
@@ -67,26 +90,36 @@ Single-file script (`index.py`) that converts archived blog posts into Jekyll-co
 
 `extract_metadata_docx` reads what `docx_to_html()` planted: the `.docx`'s `docProps/core.xml` (title, author, created date) is read by `read_docx_core_props()` and written into `<meta>` tags plus a `content="docx (ghost-2-md)"` generator marker, so the docx adapter (`detect_docx`) recognizes the wrapped HTML and reads metadata like any other CMS. Embedded images are extracted to a temp dir during the mammoth conversion (`_docx_image_handler`). `mammoth` is imported lazily inside `docx_to_html()`, so the dependency is only required when actually converting a `.docx`.
 
-**Processing pipeline** — `main()` resolves the positional source tokens via `collect_sources()` and the platform (forced via `--platform`/`--ghost`/`--wordpress`/`--docx`, else auto-detected per source). For each source `process_url()`:
-1. Loads the source (`load_source()` — `fetch()` with retry for URLs, or reads the file for a local HTML path)
-2. Strips Wayback Machine toolbar (`remove_wayback_toolbar()`)
+**ProBoards / thread content model** — forum threads are conversations, not articles. `proboards` has no `<article>` (its `content` selector is the whole `<body>`); `clean_content_proboards` rebuilds the table-soup into attributed blocks — `**author** — date` + the message as a blockquote — keying on the 20%/80% `windowbg`/`windowbg2` post cells, the `« Reply #N on <date> »` header, and the `<hr>` message boundary. `kind` is `thread`.
+
+**Output targets** — each `TARGETS[name]` entry supplies `doc_relpath`/`asset_dir`/`asset_url`/`front_matter`/`flavor`, or an `emit` hook to write something other than a single document. The conversion core produces `(metadata, body, assets)` and stays target-agnostic; `_emit_source()` dispatches to the target. The **`data`** target (`emit_citation`) writes a **citation object** per source — `_data/sources/<id>.yml` + `_sources/<id>.md` + a shipped plugin-free `_includes/cite.html` — with **honest provenance** (`derive_citation`): `archived` (Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never a fabricated link). `--screenshot` renders the page to a PNG via lazy/optional `playwright` and references it from the citation.
+
+**Capture tier** — `process_url()` inspects `Content-Type` up front; a non-markup URL (PDF/image/zip/…) is preserved by `capture_binary()` (saves the bytes as an asset + emits a record/citation, `kind` from the type) rather than forced through the article pipeline. The invariant: every source ends `converted`, `captured`, `skipped`, or `failed` — never silently dropped.
+
+**Polite HTTP + run-log** — all network I/O goes through `netpolite.polite_get()`: a global minimum interval between requests, `Retry-After` handling on 429/503, and exponential backoff on connection errors (tunable via `ARCHIVE2MD_MIN_INTERVAL`/`_MAX_RETRIES`). `process_url`/`process_markdown` return an outcome dict; `main()` appends each to `output/runlog.jsonl` (append-only coverage log) and prints a run summary.
+
+**Processing pipeline** — `main()` resolves tokens via `collect_sources()`, the platform (`--platform`/shorthands, else auto-detected), and the target (`--target`). For each source `process_url()` (or `process_markdown()` for `.md`/`.txt`):
+1. Loads the source — URLs via `polite_get()` (non-markup → `capture_binary()`); local files via `load_source()` (HTML, or `.docx` → `docx_to_html()`)
+2. Strips the Wayback toolbar (`remove_wayback_toolbar()`)
 3. Resolves the platform (`detect_platform()` when not forced) and selects its adapter
 4. Extracts metadata via the adapter's `extract_metadata`
 5. Locates article content via the adapter's `content` selector, falling back to `<article>`/`<main>`
-6. Cleans the body via the adapter's `clean` (Ghost: `clean_ghost_classes` + `normalize_headings`; WordPress: also `clean_wordpress_cruft`, which strips Kiwi share bars and related-article blocks)
-7. Derives a description from the first paragraph when the adapter supplied none (WordPress)
-8. Downloads and localizes images (`download_images()`), rewrites `src` to `/assets/img/blog/posts/{slug}/`
-9. Converts footnotes to Markdown `[^n]` syntax (`convert_footnotes()`)
-10. Converts HTML to Markdown via `markdownify`
-11. Skips a page that renders no body (e.g. a homepage template), else writes `output/_posts/YYYY-MM-DD-{slug}.md` with Jekyll YAML front matter
+6. Cleans the body via the adapter's `clean`
+7. Derives a description from the first paragraph when the adapter supplied none
+8. Downloads/localizes images (`download_images()`), rewriting `src` to the **target's** asset URL
+9. Converts footnotes to `[^n]` (`convert_footnotes()`)
+10. Converts HTML to Markdown via `markdownify`, then the target's `flavor` (kramdown pipe-escape)
+11. Skips a page with no body, else writes via the target's `_emit_source` (jekyll post / commonmark file / data citation) and records the outcome
 
-**Output layout:**
+**Output layout** (jekyll target; other targets differ):
 ```
 output/
   _posts/                        # YYYY-MM-DD-slug.md files
-  assets/img/blog/posts/{slug}/  # Downloaded images per post
+  assets/img/blog/posts/{slug}/  # downloaded images per post
+  runlog.jsonl                   # append-only per-source outcomes
+  # data target: _data/sources/<id>.yml, _sources/<id>.md, _includes/cite.html
 ```
 
-Re-runs are idempotent — existing `.md` files are skipped. The `output/` directory is gitignored.
+Re-runs are idempotent — existing outputs are skipped. The `output/` directory is gitignored.
 
-**Key dependencies:** `beautifulsoup4`, `markdownify`, `python-slugify`, `python-dateutil`, `requests`, and `mammoth` (lazy — only for `.docx` conversion)
+**Key dependencies:** `beautifulsoup4`, `markdownify`, `python-slugify`, `python-dateutil`, `requests`, `mammoth` (lazy — `.docx`), and optionally `playwright` (lazy — `--screenshot`).
