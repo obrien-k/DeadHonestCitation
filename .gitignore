@@ -2,5 +2,6 @@ venv/
 __pycache__/
 output/
 urls.txt
+.env
 .DS_Store
 .claude/

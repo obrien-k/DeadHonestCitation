@@ -3,16 +3,21 @@
 Move converted posts from this tool's output/ into a Jekyll site repo.
 
   stage    Copy posts into the repo's _drafts/ as <slug>.md (no date prefix, the
-           Jekyll-draft convention; the date stays in front matter), inject a
-           source tag (default "wuubi"), and copy each post's image assets.
+           Jekyll-draft convention; the date stays in front matter), optionally
+           inject a source tag, and copy each post's image assets.
   promote  Move a draft into _posts/<date>-<slug>.md, reading the date from the
            post's own front matter. This is the "trickle a draft into _posts" step.
+
+The Jekyll repo path and the injected source tag default from the environment —
+set ARCHIVE2MD_JEKYLL_REPO and ARCHIVE2MD_SOURCE_TAG, or drop them in a .env file
+at the repo root (see .env.example). --repo / --tag override either.
 
 Examples:
   python to_jekyll.py stage output/_posts/2018-*.md        # stage to _drafts
   python to_jekyll.py stage --to-posts output/_posts/2018-08-21-nationwide-us-prison-strike-8-21-9-9.md
   python to_jekyll.py promote unix-as-an-ide               # _drafts -> _posts
 """
+
 import argparse
 import glob
 import os
@@ -20,7 +25,30 @@ import re
 import shutil
 import sys
 
-DEFAULT_REPO = os.path.expanduser("~/git/obrien-k.github.io")
+
+def _load_dotenv(path=None):
+    """Populate os.environ from a simple KEY=VALUE .env file at the repo root,
+    without adding a dependency. Existing environment variables win; lines that
+    are blank or start with '#' are ignored. Quotes around values are stripped."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+
+_load_dotenv()
+
+# Personal defaults live in the environment / .env, not in the source. Fall back to
+# neutral placeholders so a fresh clone runs without leaking anyone's paths or tags.
+DEFAULT_REPO = os.path.expanduser(os.environ.get("ARCHIVE2MD_JEKYLL_REPO") or "~/jekyll-site")
+DEFAULT_TAG = os.environ.get("ARCHIVE2MD_SOURCE_TAG", "")
 ASSETS_REL = os.path.join("assets", "img", "blog", "posts")
 OUT_POSTS = os.path.join("output", "_posts")
 OUT_ASSETS = os.path.join("output", ASSETS_REL)
@@ -61,7 +89,7 @@ def inject_tag(text, tag):
             injected = True
     if not injected:
         out += ["tags:", f"  - {tag}"]
-    return text[:fm.start()] + "---\n" + "\n".join(out) + "\n---\n" + text[fm.end():]
+    return text[: fm.start()] + "---\n" + "\n".join(out) + "\n---\n" + text[fm.end() :]
 
 
 def copy_assets(slug, repo):
@@ -77,7 +105,7 @@ def copy_assets(slug, repo):
     return n
 
 
-def stage_one(path, repo, tag="wuubi", to_posts=False, force=False):
+def stage_one(path, repo, tag=DEFAULT_TAG, to_posts=False, force=False):
     """Stage one converted post into repo/_drafts (or _posts with to_posts), injecting
     the tag and copying assets. Returns (dest_path, asset_count), or (None, 0) if the
     destination already exists and force is False."""
@@ -176,13 +204,22 @@ def cmd_menu(args):
 
 def main():
     p = argparse.ArgumentParser(description="Stage/promote converted posts into a Jekyll repo.")
-    p.add_argument("--repo", default=DEFAULT_REPO, help=f"Jekyll repo path (default: {DEFAULT_REPO})")
+    p.add_argument(
+        "--repo", default=DEFAULT_REPO, help=f"Jekyll repo path (default: {DEFAULT_REPO})"
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("stage", help="Copy posts into _drafts/ (or _posts/ with --to-posts).")
     s.add_argument("files", nargs="*", help="Post .md files (default: all of output/_posts/).")
-    s.add_argument("--tag", default="wuubi", help='Source tag to inject (default: "wuubi"; "" to skip).')
-    s.add_argument("--to-posts", action="store_true", help="Write straight to _posts/ with a date prefix.")
+    s.add_argument(
+        "--tag",
+        default=DEFAULT_TAG,
+        help="Source tag to inject (default: $ARCHIVE2MD_SOURCE_TAG, "
+        f'currently {DEFAULT_TAG!r}; "" to skip).',
+    )
+    s.add_argument(
+        "--to-posts", action="store_true", help="Write straight to _posts/ with a date prefix."
+    )
     s.add_argument("--force", action="store_true", help="Overwrite an existing destination file.")
     s.set_defaults(func=cmd_stage)
 

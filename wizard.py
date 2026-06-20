@@ -10,11 +10,11 @@ Guided, interactive archive→Jekyll flow. Ties the pieces together:
 
 Run it with no arguments:  python wizard.py
 """
+
 import glob
 import os
 import re
 import shutil
-import sys
 
 import index
 import to_jekyll as tj
@@ -85,7 +85,7 @@ def main():
         return
 
     repo = ask(f"\nJekyll repo [{tj.DEFAULT_REPO}]: ", tj.DEFAULT_REPO)
-    tag = ask('Source tag to add [wuubi] (blank for none): ', "wuubi")
+    tag = ask(f"Source tag to add [{tj.DEFAULT_TAG}] (blank for none): ", tj.DEFAULT_TAG)
 
     print(f"\n{len(new)} new post(s) to review:\n")
     staged = 0
@@ -93,7 +93,9 @@ def main():
         s = post_summary(path)
         print(f"— {s['title']}")
         print(f"   {s['date']} · {s['words']} words · {s['links']} links · {s['images']} image(s)")
-        choice = ask("   [d]raft · [p]ost · [s]kip(delete) · [l]eave in output  (default d): ", "d").lower()
+        choice = ask(
+            "   [d]raft · [p]ost · [s]kip(delete) · [l]eave in output  (default d): ", "d"
+        ).lower()
         if choice.startswith("s"):
             discard(path)
             print("   ✗ skipped (deleted)\n")

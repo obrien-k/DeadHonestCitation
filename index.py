@@ -1,19 +1,20 @@
+import argparse
+import glob
 import os
 import re
-import sys
-import glob
-import time
 import shutil
-import zipfile
+import sys
 import tempfile
-import argparse
-import requests
+import time
+import zipfile
+from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
+
+import requests
 from bs4 import BeautifulSoup
+from dateutil import parser as dateparser
 from markdownify import markdownify as md
 from slugify import slugify
-from dateutil import parser as dateparser
-from urllib.parse import urlparse, unquote
 
 OUTPUT_DIR = "output"
 POSTS_DIR = os.path.join(OUTPUT_DIR, "_posts")
@@ -22,25 +23,23 @@ ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets", "img", "blog", "posts")
 # im_ (raw image), if_ (raw iframe), js_, cs_, oe_, etc. Tolerate any of them.
 WAYBACK_RE = re.compile(r"(?:https?://web\.archive\.org)?/web/\d+(?:[a-z]{2,3}_)?/(https?://.+)")
 
+
 def unwrap_wayback(url):
     m = WAYBACK_RE.match(url)
     return m.group(1) if m else url
 
+
 os.makedirs(POSTS_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; ghost-2-md/1.0)"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ghost-2-md/1.0)"}
+
 
 def clean_ghost_classes(soup):
     """Strip Ghost/Koenig CSS classes and data attributes from all tags."""
     for tag in soup.find_all(True):
         if tag.has_attr("class"):
-            tag["class"] = [
-                c for c in tag["class"]
-                if not c.startswith(("gh-", "kg-"))
-            ]
+            tag["class"] = [c for c in tag["class"] if not c.startswith(("gh-", "kg-"))]
             if not tag["class"]:
                 del tag["class"]
         for attr in ("data-ghost", "data-kg"):
@@ -70,10 +69,21 @@ def clean_wordpress_cruft(soup):
     on content that has none of these.
     """
     # Exact theme/plugin block classes to drop wholesale.
-    for selector in ("kiwi-article-bar", "related-articles", "related-articles-group",
-                     "related-articles-title", "related-post", "sharedaddy",
-                     "jp-relatedposts", "sd-sharing", "post-navigation", "nav-links",
-                     "comments-area", "comment-respond", "entry-footer"):
+    for selector in (
+        "kiwi-article-bar",
+        "related-articles",
+        "related-articles-group",
+        "related-articles-title",
+        "related-post",
+        "sharedaddy",
+        "jp-relatedposts",
+        "sd-sharing",
+        "post-navigation",
+        "nav-links",
+        "comments-area",
+        "comment-respond",
+        "entry-footer",
+    ):
         for el in soup.find_all(class_=selector):
             el.decompose()
     # Plugin widget families matched by class prefix (Kiwi share, Jetpack sharing).
@@ -94,7 +104,9 @@ def remove_wayback_toolbar(soup):
         el.decompose()
     return soup
 
+
 # ── Images ────────────────────────────────────────────────────────────────────
+
 
 def wayback_image_candidates(src):
     """
@@ -187,7 +199,11 @@ def download_images(soup, slug, base_dir=None):
 
         # 3. Nothing worked. Drop a dead local ref so we never emit a broken path;
         # leave a genuine remote src untouched (matches the original behavior).
-        if not localized and base_dir and not src.startswith(("http://", "https://", "//", "/web/")):
+        if (
+            not localized
+            and base_dir
+            and not src.startswith(("http://", "https://", "//", "/web/"))
+        ):
             print(f"  ⚠ Image unrecoverable, dropping: {os.path.basename(src)}")
             img.decompose()
 
@@ -247,12 +263,13 @@ def copy_local_image(src, base_dir, post_img_dir):
         print(f"  ⚠ Local image copy failed ({candidate}): {e}")
         return None
 
+
 # ── Word (.docx) ──────────────────────────────────────────────────────────────
+
 
 def _esc(s):
     """Minimal HTML-attribute escaping for values we inject into the <head>."""
-    return (s.replace("&", "&amp;").replace('"', "&quot;")
-             .replace("<", "&lt;").replace(">", "&gt;"))
+    return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def read_docx_core_props(path):
@@ -267,8 +284,7 @@ def read_docx_core_props(path):
             data = z.read("docProps/core.xml")
     except (KeyError, zipfile.BadZipFile, OSError):
         return title, author, created
-    ns = {"dc": "http://purl.org/dc/elements/1.1/",
-          "dcterms": "http://purl.org/dc/terms/"}
+    ns = {"dc": "http://purl.org/dc/elements/1.1/", "dcterms": "http://purl.org/dc/terms/"}
     try:
         root = ET.fromstring(data)
     except ET.ParseError:
@@ -334,6 +350,7 @@ def docx_to_html(path):
 
 # ── Footnotes ─────────────────────────────────────────────────────────────────
 
+
 def convert_footnotes(soup):
     """
     Convert Ghost/HTML footnotes to Markdown footnote syntax [^n].
@@ -381,8 +398,13 @@ def convert_footnotes(soup):
 YOUTUBE_RE = re.compile(r"(?:youtube\.com/(?:embed/|watch\?v=)|youtu\.be/)([\w-]{6,})")
 VIMEO_RE = re.compile(r"vimeo\.com/(?:video/)?(\d+)")
 # Embed hosts that are advertising/tracking, not content — dropped without a note.
-AD_EMBED_HOSTS = ("doubleclick.net", "googlesyndication.com", "googleadservices",
-                  "amazon-adsystem.com", "/ads/")
+AD_EMBED_HOSTS = (
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices",
+    "amazon-adsystem.com",
+    "/ads/",
+)
 
 
 def _anchor(href, text):
@@ -433,12 +455,13 @@ def convert_embeds(article, base_dir=None):
         src = recover_embed_url(src, base_dir)  # un-rewrite browser-localized embeds
         low = src.lower()
         if low.endswith(".swf") or any(h in low for h in AD_EMBED_HOSTS):
-            tag.decompose()                       # ad/Flash cruft — no personality lost
+            tag.decompose()  # ad/Flash cruft — no personality lost
             continue
         ym, vm = YOUTUBE_RE.search(src), VIMEO_RE.search(src)
         if ym:
-            tag.replace_with(_anchor(f"https://www.youtube.com/watch?v={ym.group(1)}",
-                                     "▶ Watch on YouTube"))
+            tag.replace_with(
+                _anchor(f"https://www.youtube.com/watch?v={ym.group(1)}", "▶ Watch on YouTube")
+            )
         elif vm:
             tag.replace_with(_anchor(f"https://vimeo.com/{vm.group(1)}", "▶ Watch on Vimeo"))
         else:
@@ -454,6 +477,7 @@ def convert_embeds(article, base_dir=None):
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
 
+
 def extract_metadata_ghost(soup):
     """
     Ghost: title, date, description, and tags come from Open Graph / meta tags;
@@ -468,9 +492,8 @@ def extract_metadata_ghost(soup):
         title = h1.get_text(strip=True) if h1 else "Untitled"
 
     # Date
-    date_meta = (
-        soup.find("meta", property="article:published_time")
-        or soup.find("meta", {"name": "published_time"})
+    date_meta = soup.find("meta", property="article:published_time") or soup.find(
+        "meta", {"name": "published_time"}
     )
     date = None
     if date_meta and date_meta.get("content"):
@@ -536,8 +559,9 @@ def extract_metadata_wordpress(soup):
     # Canonical first (unambiguous), then the theme's explicit post-date element,
     # and only then a bare <time> — which can belong to a sidebar/recent-posts
     # widget or a comment, so it must lose to the post-date class when both exist.
-    meta_pub = (soup.find("meta", property="article:published_time")
-                or soup.find("meta", {"name": "published_time"}))
+    meta_pub = soup.find("meta", property="article:published_time") or soup.find(
+        "meta", {"name": "published_time"}
+    )
     if meta_pub and meta_pub.get("content"):
         date_candidates.append(meta_pub["content"])
     for cls in ("post-date", "entry-date", "published", "posted-on"):
@@ -558,7 +582,7 @@ def extract_metadata_wordpress(soup):
     tags = []
     article_el = soup.find("article")
     if article_el and article_el.has_attr("class"):
-        tags = [c[len("tag-"):] for c in article_el["class"] if c.startswith("tag-")]
+        tags = [c[len("tag-") :] for c in article_el["class"] if c.startswith("tag-")]
 
     # Categories: the main post's category badge lives in
     # <div class="entry-meta"><span class="post-category"> — the standalone
@@ -570,7 +594,8 @@ def extract_metadata_wordpress(soup):
     cat_block = entry_meta.find("span", class_="post-category") if entry_meta else None
     if cat_block:
         categories = [
-            a.get_text(strip=True) for a in cat_block.find_all("a")
+            a.get_text(strip=True)
+            for a in cat_block.find_all("a")
             if a.get_text(strip=True) and slugify(a.get_text(strip=True)) not in CATEGORY_NOISE
         ]
 
@@ -633,8 +658,10 @@ def extract_metadata_generic(soup):
 
     # Description: og:description → meta description
     description = ""
-    for m in (soup.find("meta", property="og:description"),
-              soup.find("meta", {"name": "description"})):
+    for m in (
+        soup.find("meta", property="og:description"),
+        soup.find("meta", {"name": "description"}),
+    ):
         if m and m.get("content"):
             description = m["content"].strip()
             break
@@ -652,7 +679,7 @@ def clean_content_generic(article):
     """Generic body cleanup: drop non-content landmarks, then the shared scrubbers."""
     for el in article.find_all(["nav", "aside", "header", "footer", "form"]):
         el.decompose()
-    article = clean_wordpress_cruft(article)   # also covers generic WP share/related plugins
+    article = clean_wordpress_cruft(article)  # also covers generic WP share/related plugins
     article = clean_ghost_classes(article)
     article = normalize_headings(article)
     return article
@@ -691,14 +718,17 @@ def detect_ghost(soup):
 
 def detect_wordpress(soup):
     """True if the page looks like a WordPress export (any common theme)."""
-    if (soup.find("div", class_=re.compile(r"\b(post-content|entry-content)\b"))
-            and soup.find(class_=re.compile(r"\b(entry-meta|entry-header|posted-on)\b"))):
+    if soup.find("div", class_=re.compile(r"\b(post-content|entry-content)\b")) and soup.find(
+        class_=re.compile(r"\b(entry-meta|entry-header|posted-on)\b")
+    ):
         return True
     gen = soup.find("meta", attrs={"name": "generator"})
     if gen and "wordpress" in gen.get("content", "").lower():
         return True
     # wp-content asset paths are a strong WordPress signal
-    return bool(soup.find(href=re.compile(r"/wp-content/")) or soup.find(src=re.compile(r"/wp-content/")))
+    return bool(
+        soup.find(href=re.compile(r"/wp-content/")) or soup.find(src=re.compile(r"/wp-content/"))
+    )
 
 
 # Platform adapters: each registers how to detect the platform, find metadata,
@@ -804,7 +834,9 @@ def build_front_matter(title, date, description, tags, cover, categories=None):
     lines.append("---\n")
     return "\n".join(lines) + "\n"
 
+
 # ── Core ──────────────────────────────────────────────────────────────────────
+
 
 def fetch(url, retries=3, delay=2):
     """GET with simple retry logic for Wayback Machine rate limiting."""
@@ -863,7 +895,11 @@ def _dir_sources(directory, recursive):
     else:
         for name in os.listdir(directory):
             path = os.path.join(directory, name)
-            if not name.startswith(".") and os.path.isfile(path) and name.lower().endswith(SOURCE_EXTS):
+            if (
+                not name.startswith(".")
+                and os.path.isfile(path)
+                and name.lower().endswith(SOURCE_EXTS)
+            ):
                 found.append(path)
     return sorted(found)
 
@@ -902,8 +938,7 @@ def collect_sources(tokens, recursive=False):
         elif os.path.isfile(expanded):
             with open(expanded, encoding="utf-8", errors="replace") as f:
                 sources.extend(
-                    ln.strip() for ln in f
-                    if ln.strip() and not ln.lstrip().startswith("#")
+                    ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")
                 )
         else:
             print(f"  ⚠ source not found, skipping: {token}")
@@ -969,7 +1004,7 @@ def process_url(url, platform=None):
         if first_p:
             # separator=" " keeps words apart where inline tags (links) sit between them
             text = first_p.get_text(" ", strip=True)
-            text = re.sub(r"\s+", " ", text)            # collapse runs of whitespace
+            text = re.sub(r"\s+", " ", text)  # collapse runs of whitespace
             text = re.sub(r"\s+([,.;:!?])", r"\1", text)  # no space before punctuation
             if len(text) > 160:
                 text = text[:160].rsplit(" ", 1)[0] + "…"
@@ -992,9 +1027,7 @@ def process_url(url, platform=None):
     markdown = md(str(article), heading_style="ATX", bullets="-")
     # Escape | inside link text to prevent Jekyll from interpreting it as table syntax
     markdown = re.sub(
-        r'\[([^\]]*\|[^\]]*)\]',
-        lambda m: '[' + m.group(1).replace('|', r'\|') + ']',
-        markdown
+        r"\[([^\]]*\|[^\]]*)\]", lambda m: "[" + m.group(1).replace("|", r"\|") + "]", markdown
     )
     # A page with no body (e.g. a homepage/landing template) is not a post — skip it
     # rather than write an empty file. Embed-only posts still pass: convert_embeds()
@@ -1015,7 +1048,9 @@ def process_url(url, platform=None):
     for note in embed_notes:
         print(f"  ⚠ NEEDS REVIEW: {note}")
 
+
 # ── Output housekeeping ───────────────────────────────────────────────────────
+
 
 def post_slug(path):
     """Slug of an output post file (its name minus the YYYY-MM-DD- prefix and .md)."""
@@ -1073,45 +1108,78 @@ def prune_output():
 def main():
     parser = argparse.ArgumentParser(
         description="Convert archived blog posts into Jekyll Markdown. A source is a "
-                    "Wayback/live URL, a saved HTML page or Word .docx (its sibling "
-                    "'<name>_files/' folder supplies images), a directory of those, or "
-                    "a list-file of any of the above one per line."
+        "Wayback/live URL, a saved HTML page or Word .docx (its sibling "
+        "'<name>_files/' folder supplies images), a directory of those, or "
+        "a list-file of any of the above one per line."
     )
     parser.add_argument(
-        "sources", nargs="*", default=["urls.txt"],
+        "sources",
+        nargs="*",
+        default=["urls.txt"],
         help="One or more sources: a directory (every .html/.htm/.docx inside), a "
-             "saved page (.html/.htm), a Word doc (.docx), a Wayback/live URL, or a "
-             "list-file of any of those one per line (default: urls.txt).",
+        "saved page (.html/.htm), a Word doc (.docx), a Wayback/live URL, or a "
+        "list-file of any of those one per line (default: urls.txt).",
     )
     parser.add_argument(
-        "-r", "--recursive", action="store_true",
+        "-r",
+        "--recursive",
+        action="store_true",
         help="When a source is a directory, recurse into subdirectories "
-             "(skips saved-page '<name>_files/' asset folders).",
+        "(skips saved-page '<name>_files/' asset folders).",
     )
     parser.add_argument(
-        "--platform", "-p", default=None,
+        "--platform",
+        "-p",
+        default=None,
         choices=sorted(set(PLATFORMS) | set(PLATFORM_ALIASES)),
         help="Force the source platform / theme instead of auto-detecting. "
-             "Accepts: ghost (gh), wordpress (wp, yaaburnee), generic (html).",
+        "Accepts: ghost (gh), wordpress (wp, yaaburnee), generic (html).",
     )
     # Convenience flags equivalent to --platform <name>
-    parser.add_argument("--ghost", dest="platform", action="store_const", const="ghost",
-                        help="Shorthand for --platform ghost")
-    parser.add_argument("--wordpress", "--yaaburnee", dest="platform",
-                        action="store_const", const="wordpress",
-                        help="Shorthand for --platform wordpress")
-    parser.add_argument("--generic", "--html", dest="platform", action="store_const",
-                        const="generic",
-                        help="Shorthand for --platform generic (arbitrary HTML pages)")
-    parser.add_argument("--docx", "--word", dest="platform", action="store_const",
-                        const="docx",
-                        help="Shorthand for --platform docx (Word .docx files)")
-    parser.add_argument("--clean", action="store_true",
-                        help="Delete all generated output (posts + assets) and exit.")
-    parser.add_argument("--prune", action="store_true",
-                        help="Remove stale output (older slug duplicates, orphaned assets) and exit.")
-    parser.add_argument("-y", "--yes", action="store_true",
-                        help="Skip confirmation prompts (e.g. for --clean).")
+    parser.add_argument(
+        "--ghost",
+        dest="platform",
+        action="store_const",
+        const="ghost",
+        help="Shorthand for --platform ghost",
+    )
+    parser.add_argument(
+        "--wordpress",
+        "--yaaburnee",
+        dest="platform",
+        action="store_const",
+        const="wordpress",
+        help="Shorthand for --platform wordpress",
+    )
+    parser.add_argument(
+        "--generic",
+        "--html",
+        dest="platform",
+        action="store_const",
+        const="generic",
+        help="Shorthand for --platform generic (arbitrary HTML pages)",
+    )
+    parser.add_argument(
+        "--docx",
+        "--word",
+        dest="platform",
+        action="store_const",
+        const="docx",
+        help="Shorthand for --platform docx (Word .docx files)",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete all generated output (posts + assets) and exit.",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="Remove stale output (older slug duplicates, orphaned assets) and exit.",
+    )
+    parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompts (e.g. for --clean)."
+    )
     args = parser.parse_args()
 
     # Housekeeping actions run on their own and exit.
@@ -1135,6 +1203,7 @@ def main():
     for src in sources:
         process_url(src, platform)
     print("\nDone.")
+
 
 if __name__ == "__main__":
     main()
