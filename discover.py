@@ -25,13 +25,13 @@ instead (out of scope here — keep discovery cheap and offline-of-the-body).
 
 import argparse
 import sys
-import time
 
 import requests
 
+from netpolite import polite_get
+
 CDX_API = "https://web.archive.org/cdx/search/cdx"
 SAVE_API = "https://web.archive.org/save/"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; archive-2-md/1.0)"}
 
 # Hosting platforms where a site's name becomes a subdomain — the candidates probed
 # by --recover when you remember a name but not the host.
@@ -75,8 +75,7 @@ def discover(domain, contains=None, status="200", mimetype="text/html", newest=F
         # "first" is the most recent capture instead of the oldest.
         params.append(("reverse", "true"))
 
-    resp = requests.get(CDX_API, params=params, headers=HEADERS, timeout=timeout)
-    resp.raise_for_status()
+    resp = polite_get(CDX_API, params=params, timeout=timeout)
 
     rows = []
     for line in resp.text.splitlines():
@@ -107,8 +106,7 @@ def host_latest_capture(host, timeout=30):
         ("output", "text"),
     ]
     try:
-        resp = requests.get(CDX_API, params=params, headers=HEADERS, timeout=timeout)
-        resp.raise_for_status()
+        resp = polite_get(CDX_API, params=params, timeout=timeout)
     except requests.RequestException:
         return None
     line = resp.text.strip()
@@ -119,9 +117,7 @@ def host_is_live(host, timeout=10):
     """True if the host responds today (tries HTTPS then HTTP)."""
     for scheme in ("https://", "http://"):
         try:
-            resp = requests.head(
-                scheme + host, headers=HEADERS, timeout=timeout, allow_redirects=True
-            )
+            resp = polite_get(scheme + host, method="HEAD", timeout=timeout, raise_on_error=False)
             if resp.status_code < 400:
                 return True
         except requests.RequestException:
@@ -129,15 +125,13 @@ def host_is_live(host, timeout=10):
     return False
 
 
-def recover(name, domains, timeout=30, delay=0.5):
+def recover(name, domains, timeout=30):
     """Probe `name.<domain>` candidates; return [(host, latest_capture, is_live)] for
     those that are archived and/or live. The dependency-free counterpart to a web
-    search when you remember a site's name but not its exact host. A small delay
-    between probes keeps the burst polite (the full rate-limit layer lands in step 8)."""
+    search when you remember a site's name but not its exact host. The shared polite
+    layer rate-limits the probe burst."""
     results = []
-    for i, domain in enumerate(domains):
-        if i:
-            time.sleep(delay)
+    for domain in domains:
         host = f"{name}.{domain}"
         latest = host_latest_capture(host, timeout)
         live = host_is_live(host)
@@ -151,7 +145,7 @@ def save_page_now(url, timeout=120):
     archive permalink, or None. NOTE: this publishes a public snapshot."""
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    resp = requests.get(SAVE_API + url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+    resp = polite_get(SAVE_API + url, timeout=timeout)
     loc = resp.headers.get("Content-Location")
     if loc:
         return "https://web.archive.org" + loc

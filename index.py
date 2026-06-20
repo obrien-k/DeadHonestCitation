@@ -1,6 +1,7 @@
 import argparse
 import copy
 import glob
+import json
 import os
 import re
 import shutil
@@ -11,15 +12,17 @@ import zipfile
 from urllib.parse import unquote, urlparse
 from xml.etree import ElementTree as ET
 
-import requests
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 from markdownify import markdownify as md
 from slugify import slugify
 
+from netpolite import polite_get
+
 OUTPUT_DIR = "output"
 POSTS_DIR = os.path.join(OUTPUT_DIR, "_posts")
 ASSETS_DIR = os.path.join(OUTPUT_DIR, "assets", "img", "blog", "posts")
+RUNLOG = os.path.join(OUTPUT_DIR, "runlog.jsonl")
 # Wayback snapshot URLs carry an optional capture-mode suffix on the timestamp:
 # im_ (raw image), if_ (raw iframe), js_, cs_, oe_, etc. Tolerate any of them.
 WAYBACK_RE = re.compile(r"(?:https?://web\.archive\.org)?/web/\d+(?:[a-z]{2,3}_)?/(https?://.+)")
@@ -33,7 +36,7 @@ def unwrap_wayback(url):
 os.makedirs(POSTS_DIR, exist_ok=True)
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ghost-2-md/1.0)"}
+# HEADERS / polite_get come from netpolite (shared, rate-limited HTTP layer).
 
 
 def clean_ghost_classes(soup):
@@ -131,8 +134,7 @@ def wayback_image_candidates(src):
 def download_image(url, post_img_dir):
     """Download a single image to post_img_dir. Returns the local path, or None on failure."""
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
+        response = polite_get(url, timeout=15)
         filename = os.path.basename(urlparse(url).path) or "image"
         local_path = os.path.join(post_img_dir, filename)
         with open(local_path, "wb") as f:
@@ -1176,19 +1178,9 @@ def resolve_target(name):
 # ── Core ──────────────────────────────────────────────────────────────────────
 
 
-def fetch(url, retries=3, delay=2):
-    """GET with simple retry logic for Wayback Machine rate limiting."""
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=20)
-            r.raise_for_status()
-            return r
-        except requests.RequestException as e:
-            if attempt < retries - 1:
-                print(f"  Retrying ({attempt + 1}/{retries - 1})…")
-                time.sleep(delay * (attempt + 1))
-            else:
-                raise e
+def fetch(url):
+    """Fetch a page through the shared polite layer (rate limit + backoff + Retry-After)."""
+    return polite_get(url)
 
 
 # Local file extensions the pipeline can read directly (a saved page or a Word doc).
@@ -1288,6 +1280,28 @@ def collect_sources(tokens, recursive=False, txt_as_content=False):
     return unique
 
 
+def _outcome(status, output=None, reason=None):
+    """A per-source result for the run log: status is converted / skipped / failed."""
+    return {"status": status, "output": output, "reason": reason}
+
+
+def log_run(url, outcome, target):
+    """Append one source's outcome to output/runlog.jsonl (an append-only audit log —
+    a record of coverage, not a database). Best-effort: never fail the run over it."""
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "url": url,
+        "target": target,
+        **outcome,
+    }
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(RUNLOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
 def _emit_source(tgt, doc_relpath, url, base_dir, platform_name, slug, meta, body, footnotes):
     """Write one converted source via the active target; return its relpath. Shared by
     the HTML pipeline (process_url) and the Markdown passthrough (process_markdown)."""
@@ -1363,12 +1377,12 @@ def process_markdown(path, target=None):
             text = f.read()
     except OSError as e:
         print(f"  ✗ Failed to load: {e}")
-        return
+        return _outcome("failed", reason=f"load: {e}")
     meta_in, body = _parse_simple_front_matter(text)
     body = body.strip("\n")
     if not body.strip():
         print("  ✗ Empty file — skipping.")
-        return
+        return _outcome("skipped", reason="empty file")
     stem = os.path.splitext(os.path.basename(expanded))[0]
     title = (
         meta_in.get("title")
@@ -1392,11 +1406,12 @@ def process_markdown(path, target=None):
     doc_relpath = tgt["doc_relpath"](slug, meta["date"] or None)
     if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
         print(f"  ↷ Already exists, skipping: {doc_relpath}")
-        return
+        return _outcome("skipped", doc_relpath, reason="exists")
     written = _emit_source(
         tgt, doc_relpath, path, os.path.dirname(expanded), "txt", slug, meta, body + "\n", ""
     )
     print(f"  ✓ Saved: {written}")
+    return _outcome("converted", written)
 
 
 def process_url(url, platform=None, target=None):
@@ -1409,7 +1424,7 @@ def process_url(url, platform=None, target=None):
         html, base_dir = load_source(url)
     except Exception as e:
         print(f"  ✗ Failed to load: {e}")
-        return
+        return _outcome("failed", reason=f"load: {e}")
 
     soup = BeautifulSoup(html, "html.parser")
     soup = remove_wayback_toolbar(soup)
@@ -1417,7 +1432,7 @@ def process_url(url, platform=None, target=None):
     resolved = platform or detect_platform(soup)
     if resolved is None:
         print("  ✗ Could not detect platform — re-run with --platform; skipping.")
-        return
+        return _outcome("failed", reason="platform not detected")
     if not platform:
         print(f"  · detected platform: {resolved}")
     adapter = PLATFORMS[resolved]
@@ -1444,7 +1459,7 @@ def process_url(url, platform=None, target=None):
     article = article or soup.find("article") or soup.find("main")
     if not article:
         print("  ✗ No article content found — skipping.")
-        return
+        return _outcome("skipped", reason="no article content")
 
     article = adapter["clean"](article)
 
@@ -1468,7 +1483,7 @@ def process_url(url, platform=None, target=None):
 
     if os.path.exists(filepath):
         print(f"  ↷ Already exists, skipping: {doc_relpath}")
-        return
+        return _outcome("skipped", doc_relpath, reason="exists")
 
     article = download_images(article, slug, base_dir, tgt)
     article, embed_notes = convert_embeds(article, base_dir)
@@ -1481,7 +1496,7 @@ def process_url(url, platform=None, target=None):
     # leaves a Markdown link in the body.
     if not markdown.strip():
         print("  ✗ No meaningful content — skipping.")
-        return
+        return _outcome("skipped", reason="empty body")
 
     meta = {
         "title": title,
@@ -1498,6 +1513,7 @@ def process_url(url, platform=None, target=None):
     print(f"  ✓ Saved: {written}")
     for note in embed_notes:
         print(f"  ⚠ NEEDS REVIEW: {note}")
+    return _outcome("converted", written, reason="; ".join(embed_notes) or None)
 
 
 # ── Output housekeeping ───────────────────────────────────────────────────────
@@ -1669,12 +1685,19 @@ def main():
     target = TARGET_ALIASES.get(args.target, args.target)
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
     print(f"Processing {len(sources)} source(s), {mode}, → {target}…")
+    tally = {}
     for src in sources:
         if is_markdown_source(src, md_mode):
-            process_markdown(src, target)
+            result = process_markdown(src, target)
         else:
-            process_url(src, platform, target)
-    print("\nDone.")
+            result = process_url(src, platform, target)
+        result = result or _outcome("failed", reason="no result")
+        log_run(src, result, target)
+        tally[result["status"]] = tally.get(result["status"], 0) + 1
+
+    summary = ", ".join(f"{n} {status}" for status, n in sorted(tally.items()))
+    print(f"\nDone — {summary or 'nothing processed'}.")
+    print(f"Run log: {RUNLOG}")
 
 
 if __name__ == "__main__":
