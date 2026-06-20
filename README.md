@@ -1,10 +1,10 @@
 # archive-2-md
 
-Convert archived blog posts — captured on the [Wayback Machine](https://web.archive.org/), saved to disk, or written in Word — into Jekyll-compatible Markdown, deterministically and without rewriting the prose.
+Convert archived web pages — captured on the [Wayback Machine](https://web.archive.org/), saved to disk, or written in Word — into Markdown, deterministically and without rewriting the prose.
 
-The tool is **platform-agnostic**: a small registry of *adapters* teaches it how to read each source CMS, theme, or format. Four ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, and **Word `.docx`** — and adding another is a single registry entry. The output is plain Markdown with [kramdown](https://kramdown.gettalong.org/)-friendly front matter and footnotes, so posts drop straight into a Jekyll site.
+The tool is **platform-agnostic** on both ends. A registry of *input adapters* teaches it how to read each source CMS, theme, or format; five ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, **Word `.docx`**, and **ProBoards** forum threads. A symmetric registry of *output targets* decides how results are written — **Jekyll** ([kramdown](https://kramdown.gettalong.org/)-friendly front matter, the default), **CommonMark**, or a **data** target that emits provenance-stamped citation objects. Adding either end is a single registry entry.
 
-> The repository is still named `ghost-2-md` for historical reasons — it started as a Ghost-only exporter and grew into a general archive→Markdown converter. The name (and the `archive-2-md` title) will settle once the shape does.
+> Working name: **DeadHonestCitation**. The repository is still `ghost-2-md` for historical reasons — it started as a Ghost-only exporter and grew into a general archive→Markdown converter. The rename will land once the shape settles.
 
 ## What it does
 
@@ -20,16 +20,16 @@ For each source it:
 - Downloads and localizes every image, rewriting `src` to a repo-relative asset path
 - Converts footnotes to native Markdown `[^1]` syntax (kramdown-compatible)
 - Converts HTML → Markdown (headings, links, tables, code blocks) and escapes `|` so kramdown won't misread link text as a table
-- Writes `YYYY-MM-DD-slug.md` with Jekyll YAML front matter
+- Writes the result through the chosen output target (Jekyll post, CommonMark file, or a citation object)
 
-Re-runs are idempotent — posts whose `.md` already exists are skipped.
+Forum threads use a *thread* content model: each post is preserved as an attributed `**author** — date` block with the message as a blockquote, rather than flattened into one article. Loose `.md`/`.txt` files pass through verbatim (no HTML round-trip). Re-runs are idempotent — outputs that already exist are skipped.
 
 ## The pieces
 
 | Script | Role |
 |--------|------|
 | `index.py` | The converter. Reads sources → writes Markdown into `output/`. |
-| `discover.py` | Finds archived URLs for a domain on the Wayback Machine, so you don't have to know them up front. |
+| `discover.py` | Finds Wayback URLs without knowing them up front: enumerate a domain, recover an unknown host from a remembered name, or Save Page Now a live URL. |
 | `to_jekyll.py` | Stages converted posts into a Jekyll repo's `_drafts/` and promotes them into `_posts/`. |
 | `wizard.py` | Guided, interactive flow that ties the above together. |
 
@@ -64,10 +64,11 @@ The pipeline in `process_url()` is platform-neutral — it calls into the resolv
 
 | Token | Becomes |
 |-------|---------|
-| a directory | every `*.html`/`*.htm`/`*.docx` inside (recurse with `--recursive`) |
+| a directory | every source file inside (recurse with `--recursive`) |
 | an `http(s)` URL | itself |
 | a `.html`/`.htm`/`.docx` path | that one saved page or Word doc |
-| any other existing file | a *list file* — one source per non-blank, non-`#` line (the classic `urls.txt`) |
+| a `.md`/`.markdown` path | a Markdown passthrough (also `.txt` under `--txt`) |
+| any other existing file | a *list file* — one source per non-blank, non-`#` line (the classic `urls.txt`; `.txt` stays a list file unless `--txt`) |
 
 ### Adding a platform
 
@@ -118,7 +119,9 @@ python index.py urls.txt --ghost               # alias: -p gh
 
 ### Discovering archived URLs
 
-If you don't already have the URLs, `discover.py` enumerates a domain's captures from the Wayback Machine and prints them in the format `index.py` consumes:
+If you don't already have the URLs, `discover.py` has three modes.
+
+**Enumerate a known domain** — prints captures in the format `index.py` consumes:
 
 ```bash
 python discover.py example.com                  # every archived HTML page
@@ -128,6 +131,19 @@ python discover.py example.com --newest         # each URL's most recent capture
 ```
 
 > CDX (the Wayback index) exposes the captured **URL**, not the page `<title>`, so `--contains` matches the slug. For Ghost/WordPress the slug is usually derived from the title, so a title word is normally present — but a post that was never crawled (e.g. a draft) won't appear at all.
+
+**Recover an unknown host** from a remembered *name* — probes common hosting platforms (and any `--on DOMAIN`) and reports which candidates are archived and/or live:
+
+```bash
+python discover.py --recover myoldforum               # try myoldforum.proboards.com, .blogspot.com, …
+python discover.py --recover myblog --on example.com  # also try myblog.example.com
+```
+
+**Save Page Now** — archive a live-but-unarchived URL and print its new permalink (turns a `live` source into an `archived` one):
+
+```bash
+python discover.py --save https://example.com/page/
+```
 
 ### Local HTML files (offline, no Wayback)
 
@@ -152,6 +168,33 @@ Point the tool at a `.docx` (or a directory of them). It's converted to HTML up 
 ```bash
 python index.py draft.docx                      # auto-detected; or force with --docx / --word
 ```
+
+### Markdown / plain-text passthrough
+
+Loose `.md`/`.markdown` files are brought in verbatim (no HTML round-trip): the body is kept as-is and title/date/tags are lifted from a leading YAML front-matter block if present, else the first heading or the filename. A `.txt` file stays a *list file* by default (so `urls.txt` keeps working) — pass `--txt` to treat `.txt` inputs as Markdown content instead:
+
+```bash
+python index.py notes.md                        # .md is always passthrough
+python index.py old-post.txt --txt              # treat .txt as content, not a list file
+```
+
+### Output formats
+
+`--target` selects how results are written (default `jekyll`):
+
+```bash
+python index.py urls.txt                         # jekyll posts (default)
+python index.py urls.txt --target commonmark     # plain CommonMark + minimal front matter
+python index.py urls.txt --target data           # provenance-stamped citation objects
+```
+
+The **`data`** target writes each source as a citation rather than a post:
+
+- `_data/sources/<id>.yml` — the citation record (id = title slug = cite key)
+- `_sources/<id>.md` — the extracted content
+- `_includes/cite.html` — a plugin-free Jekyll include, shipped once
+
+Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. See `DESIGN.md` for the citation object and the rest of the direction.
 
 ### Moving posts into a Jekyll site
 
@@ -204,5 +247,5 @@ Configuration lives in `pyproject.toml`. There are no automated tests yet.
 
 ## Notes
 
-- Inputs are **Wayback Machine URLs**, **local saved HTML files**, or **Word `.docx`** — the first two expose the archived HTML structure (meta tags, theme classes) the adapters read. Live URLs work too if the page still matches an adapter's markup.
+- Inputs are **Wayback Machine URLs**, **local saved HTML files**, **Word `.docx`**, or loose **Markdown/`.txt`** — the HTML kinds expose the structure (meta tags, theme classes) the adapters read. Live URLs work too if the page still matches an adapter's markup.
 - Image downloads may fail for assets the Wayback Machine never crawled; the script warns and continues. It prefers the archive's raw-image (`im_`) capture and falls back to the original URL. (Local HTML inputs copy images from the `_files/` folder instead.)
