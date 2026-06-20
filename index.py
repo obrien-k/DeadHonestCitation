@@ -880,6 +880,132 @@ def commonmark_front_matter(meta):
     return "\n".join(lines) + "\n"
 
 
+# ── Citation objects (the `data` target) ──────────────────────────────────────
+# The `data` target writes each source as a provenance-stamped citation record
+# (_data/sources/<id>.yml) plus its extracted content (_sources/<id>.md), and ships
+# a plugin-free Jekyll include to render it. Provenance is honest by construction:
+# `archived` (public Wayback permalink + timestamp), `live` (URL + access date), or
+# `local` (an author's personal copy — no public link).
+
+KIND_BY_PLATFORM = {
+    "ghost": "post",
+    "wordpress": "post",
+    "generic": "page",
+    "docx": "document",
+}
+
+CITE_INCLUDE = """{%- comment -%}
+Render a source citation by id from _data/sources/.  Usage:
+  {% include cite.html id="some-slug" %}
+Shipped by DeadHonestCitation's `data` target; safe to edit/restyle.
+{%- endcomment -%}
+{%- assign s = site.data.sources[include.id] -%}
+{%- if s -%}
+<figure class="citation" id="cite-{{ include.id }}">
+  {%- if s.screenshot %}
+  <a href="{% if s.archive_url %}{{ s.archive_url }}{% else %}{{ s.source_url }}{% endif %}"><img src="{{ s.screenshot | relative_url }}" alt="{{ s.title | escape }}"></a>
+  {%- endif %}
+  <figcaption>
+    <strong>{{ s.title | escape }}</strong>
+    {%- if s.provenance == "archived" %} — <a href="{{ s.archive_url }}">archived {{ s.captured_at }}</a>
+    {%- elsif s.provenance == "live" %} — <a href="{{ s.source_url }}">live</a> (accessed {{ s.captured_at }})
+    {%- else %} — author's personal copy{% endif -%}
+    {%- if s.note and s.note != "" %}<br>{{ s.note }}{% endif -%}
+  </figcaption>
+</figure>
+{%- else -%}
+<!-- cite: '{{ include.id }}' not found in _data/sources -->
+{%- endif -%}
+"""
+
+
+def derive_citation(url, base_dir, platform_name):
+    """Provenance fields for a source. Honest by construction: a local copy never
+    claims a public link, and an archived capture carries its real permalink + date."""
+    kind = KIND_BY_PLATFORM.get(platform_name, "page")
+    if base_dir is not None:
+        # A local saved file or .docx — an author's personal copy, not public.
+        return {
+            "provenance": "local",
+            "source_url": os.path.basename(url),
+            "archive_url": None,
+            "captured_at": None,
+            "kind": kind,
+        }
+    m = WAYBACK_RE.match(url)
+    if m:
+        ts = re.search(r"/web/(\d{4})(\d{2})(\d{2})", url)
+        captured = f"{ts.group(1)}-{ts.group(2)}-{ts.group(3)}" if ts else None
+        return {
+            "provenance": "archived",
+            "source_url": m.group(1),
+            "archive_url": url,
+            "captured_at": captured,
+            "kind": kind,
+        }
+    # A live URL fetched directly — record today's access date.
+    return {
+        "provenance": "live",
+        "source_url": url,
+        "archive_url": None,
+        "captured_at": time.strftime("%Y-%m-%d"),
+        "kind": kind,
+    }
+
+
+def _yaml_str(value):
+    """Quote a scalar for safe single-line YAML."""
+    s = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{s}"'
+
+
+def ensure_cite_include(out_dir):
+    """Write the cite include once, so a site can render citations with no plugin."""
+    path = os.path.join(out_dir, "_includes", "cite.html")
+    if os.path.exists(path):
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(CITE_INCLUDE)
+
+
+def emit_citation(out_dir, slug, meta, markdown, footnotes, cite):
+    """Write the citation record + extracted content for one source; return the
+    record's relpath. (The `data` target's writer.)"""
+    content_rel = os.path.join("_sources", f"{slug}.md")
+    content_path = os.path.join(out_dir, content_rel)
+    os.makedirs(os.path.dirname(content_path), exist_ok=True)
+    with open(content_path, "w", encoding="utf-8") as f:
+        f.write(markdown)
+        if footnotes.strip():
+            f.write(footnotes)
+
+    lines = [
+        f"id: {slug}",
+        f"title: {_yaml_str(meta['title'])}",
+        f"kind: {cite['kind']}",
+        f"provenance: {cite['provenance']}",
+    ]
+    if cite["source_url"]:
+        lines.append(f"source_url: {_yaml_str(cite['source_url'])}")
+    if cite["archive_url"]:
+        lines.append(f"archive_url: {_yaml_str(cite['archive_url'])}")
+    if cite["captured_at"]:
+        lines.append(f"captured_at: {cite['captured_at']}")
+    # screenshot: populated by the screenshot step; left absent until then.
+    lines.append(f"content: {_yaml_str(content_rel)}")
+    lines.append('note: ""')
+
+    yml_rel = os.path.join("_data", "sources", f"{slug}.yml")
+    yml_path = os.path.join(out_dir, yml_rel)
+    os.makedirs(os.path.dirname(yml_path), exist_ok=True)
+    with open(yml_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+    ensure_cite_include(out_dir)
+    return yml_rel
+
+
 TARGETS = {
     "jekyll": {
         "doc_relpath": lambda slug, date: os.path.join(
@@ -897,6 +1023,15 @@ TARGETS = {
         "front_matter": commonmark_front_matter,
         "flavor": escape_table_pipes,
     },
+    # Provenance-stamped citation records, not posts. Writes _data/sources/<id>.yml
+    # + _sources/<id>.md via emit_citation; images go under /assets/img/sources/.
+    "data": {
+        "doc_relpath": lambda slug, date: os.path.join("_data", "sources", f"{slug}.yml"),
+        "asset_dir": lambda slug: os.path.join("assets", "img", "sources", slug),
+        "asset_url": lambda slug, fname: f"/assets/img/sources/{slug}/{fname}",
+        "flavor": escape_table_pipes,
+        "emit": emit_citation,
+    },
 }
 
 TARGET_ALIASES = {
@@ -906,6 +1041,9 @@ TARGET_ALIASES = {
     "cm": "commonmark",
     "plain": "commonmark",
     "md": "commonmark",
+    "data": "data",
+    "citation": "data",
+    "cite": "data",
 }
 
 
@@ -1092,7 +1230,8 @@ def process_url(url, platform=None, target=None):
             description = text
 
     slug = slugify(title)
-    local_cover = download_cover(cover, slug, tgt)
+    # The cover is a post field; citation targets get imagery from the screenshot step.
+    local_cover = "" if tgt.get("emit") else download_cover(cover, slug, tgt)
     doc_relpath = tgt["doc_relpath"](slug, str(date) if date else None)
     filepath = os.path.join(OUTPUT_DIR, doc_relpath)
 
@@ -1121,16 +1260,21 @@ def process_url(url, platform=None, target=None):
         "cover": local_cover,
         "categories": categories,
     }
-    front_matter = tgt["front_matter"](meta)
 
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(front_matter)
-        f.write(markdown)
-        if md_footnotes.strip():
-            f.write(md_footnotes)
+    if tgt.get("emit"):
+        cite = derive_citation(url, base_dir, resolved)
+        written = tgt["emit"](OUTPUT_DIR, slug, meta, markdown, md_footnotes, cite)
+    else:
+        front_matter = tgt["front_matter"](meta)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(front_matter)
+            f.write(markdown)
+            if md_footnotes.strip():
+                f.write(md_footnotes)
+        written = doc_relpath
 
-    print(f"  ✓ Saved: {doc_relpath}")
+    print(f"  ✓ Saved: {written}")
     for note in embed_notes:
         print(f"  ⚠ NEEDS REVIEW: {note}")
 
