@@ -15,7 +15,7 @@ import time
 
 import requests
 
-USER_AGENT = "dead-honest-citation/0.1 (+https://github.com/obrien-k/DeadHonestCitation)"
+USER_AGENT = "dead-honest-citation/0.3 (+https://github.com/obrien-k/DeadHonestCitation)"
 HEADERS = {"User-Agent": USER_AGENT}
 
 MIN_INTERVAL = float(os.environ.get("DHC_MIN_INTERVAL", "0.5"))

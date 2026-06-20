@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-06-20
 
 ### Changed
 - **Renamed the project to DeadHonestCitation.** GitHub repo
@@ -12,6 +12,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Environment variables `ARCHIVE2MD_*` → `DHC_*` (update your `.env`). The docx
   generator marker is now `content="docx (DeadHonestCitation)"`; `detect_docx`
   keys on the `docx` substring, so previously-converted files still round-trip.
+  User-Agent → `dead-honest-citation/0.3`.
 - Moved the design doc to `docs/DESIGN.md`.
 
 ## [0.2.0] - 2026-06-20
@@ -72,6 +73,6 @@ First public-ready release: a platform-agnostic archive→Markdown converter.
 - Image and cover downloads from the Wayback Machine (prefers `im_` raw captures).
 - Escape `|` in Markdown link text so kramdown doesn't misread it as a table.
 
-[Unreleased]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/obrien-k/DeadHonestCitation/releases/tag/v0.1.0
