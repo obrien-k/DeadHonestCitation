@@ -1,4 +1,4 @@
-# archive-2-md
+# DeadHonestCitation
 
 Convert archived web pages — captured on the [Wayback Machine](https://web.archive.org/), saved to disk, or written in Word — into Markdown, deterministically and without rewriting the prose.
 
