@@ -194,7 +194,9 @@ The **`data`** target writes each source as a citation rather than a post:
 - `_sources/<id>.md` — the extracted content
 - `_includes/cite.html` — a plugin-free Jekyll include, shipped once
 
-Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. See `DESIGN.md` for the citation object and the rest of the direction.
+Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs `playwright` — `pip install playwright && playwright install chromium`). See `DESIGN.md` for the citation object and the rest of the direction.
+
+A source that isn't convertible HTML — a PDF, image, or other binary — is **captured verbatim** (saved as an asset, recorded with a reference) rather than dropped, so a run preserves everything it touches. Each source's outcome (converted / captured / skipped / failed) is appended to `output/runlog.jsonl`.
 
 ### Moving posts into a Jekyll site
 

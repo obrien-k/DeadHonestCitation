@@ -1042,10 +1042,11 @@ Shipped by DeadHonestCitation's `data` target; safe to edit/restyle.
 """
 
 
-def derive_citation(url, base_dir, platform_name):
+def derive_citation(url, base_dir, platform_name, kind=None):
     """Provenance fields for a source. Honest by construction: a local copy never
-    claims a public link, and an archived capture carries its real permalink + date."""
-    kind = KIND_BY_PLATFORM.get(platform_name, "page")
+    claims a public link, and an archived capture carries its real permalink + date.
+    kind overrides the platform→kind map (e.g. a captured image/document)."""
+    kind = kind or KIND_BY_PLATFORM.get(platform_name, "page")
     if base_dir is not None:
         # A local saved file or .docx — an author's personal copy, not public.
         return {
@@ -1115,7 +1116,8 @@ def emit_citation(out_dir, slug, meta, markdown, footnotes, cite):
         lines.append(f"archive_url: {_yaml_str(cite['archive_url'])}")
     if cite["captured_at"]:
         lines.append(f"captured_at: {cite['captured_at']}")
-    # screenshot: populated by the screenshot step; left absent until then.
+    if meta.get("screenshot"):
+        lines.append(f"screenshot: {_yaml_str(meta['screenshot'])}")
     lines.append(f"content: {_yaml_str(content_rel)}")
     lines.append('note: ""')
 
@@ -1302,11 +1304,13 @@ def log_run(url, outcome, target):
         pass
 
 
-def _emit_source(tgt, doc_relpath, url, base_dir, platform_name, slug, meta, body, footnotes):
+def _emit_source(
+    tgt, doc_relpath, url, base_dir, platform_name, slug, meta, body, footnotes, kind=None
+):
     """Write one converted source via the active target; return its relpath. Shared by
     the HTML pipeline (process_url) and the Markdown passthrough (process_markdown)."""
     if tgt.get("emit"):
-        cite = derive_citation(url, base_dir, platform_name)
+        cite = derive_citation(url, base_dir, platform_name, kind=kind)
         return tgt["emit"](OUTPUT_DIR, slug, meta, body, footnotes, cite)
     filepath = os.path.join(OUTPUT_DIR, doc_relpath)
     front_matter = tgt["front_matter"](meta)
@@ -1414,17 +1418,110 @@ def process_markdown(path, target=None):
     return _outcome("converted", written)
 
 
-def process_url(url, platform=None, target=None):
+# ── Capture tier ──────────────────────────────────────────────────────────────
+# Not every source is convertible HTML. A URL whose content is a PDF, image, zip,
+# etc. is captured verbatim — saved as an asset and recorded with a reference —
+# rather than forced through the article pipeline or dropped. Completeness over
+# cleanliness: every source ends converted, captured, or failed (never silent).
+
+MARKUP_TYPES = ("text/html", "application/xhtml", "application/xml", "text/xml")
+
+
+def _is_markup(content_type):
+    """True if a Content-Type should go through the HTML pipeline."""
+    ct = (content_type or "").split(";")[0].strip().lower()
+    return (not ct) or ct.startswith(MARKUP_TYPES) or ct.endswith("+xml")
+
+
+def _capture_kind(content_type):
+    ct = (content_type or "").lower()
+    if ct.startswith("image/"):
+        return "image"
+    if "pdf" in ct or ct.startswith(("application/msword", "application/vnd")):
+        return "document"
+    return "file"
+
+
+def capture_binary(content, content_type, url, tgt):
+    """Preserve a non-HTML source verbatim: save the bytes as an asset and emit a
+    record that references them. Returns an outcome dict."""
+    original = unwrap_wayback(url)
+    name = os.path.basename(urlparse(original).path) or "capture"
+    slug = slugify(os.path.splitext(name)[0]) or "capture"
+    kind = _capture_kind(content_type)
+
+    asset_dir = os.path.join(OUTPUT_DIR, tgt["asset_dir"](slug))
+    os.makedirs(asset_dir, exist_ok=True)
+    with open(os.path.join(asset_dir, name), "wb") as f:
+        f.write(content)
+    asset_url = tgt["asset_url"](slug, name)
+
+    body = f"![{name}]({asset_url})\n" if kind == "image" else f"[{name}]({asset_url})\n"
+    meta = {
+        "title": name,
+        "date": "",
+        "description": f"Captured {kind}: {name}",
+        "tags": [],
+        "cover": "",
+        "categories": [],
+    }
+    doc_relpath = tgt["doc_relpath"](slug, None)
+    if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
+        print(f"  ↷ Already exists, skipping: {doc_relpath}")
+        return _outcome("skipped", doc_relpath, reason="exists")
+    written = _emit_source(tgt, doc_relpath, url, None, "capture", slug, meta, body, "", kind=kind)
+    print(f"  ✓ Captured ({kind}): {written}")
+    return _outcome("captured", written, reason=kind)
+
+
+def screenshot_page(url, out_path, timeout=30000):
+    """Render a page to a PNG with a headless browser. Returns True on success.
+    Playwright is imported lazily and is optional — like mammoth for .docx — so the
+    core install stays light; a screenshot just no-ops with a hint when it's absent."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print(
+            "  ⚠ screenshots need playwright: pip install playwright && playwright install chromium"
+        )
+        return False
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch()
+            page = browser.new_page()
+            page.goto(url, wait_until="networkidle", timeout=timeout)
+            page.screenshot(path=out_path, full_page=True)
+            browser.close()
+        return True
+    except Exception as e:
+        print(f"  ⚠ screenshot failed: {e}")
+        return False
+
+
+def process_url(url, platform=None, target=None, screenshot=False):
     """Convert one source — a Wayback/live URL or a local HTML file. If platform is
     None, auto-detect it from the markup. target selects the output format/layout
-    (defaults to jekyll)."""
+    (defaults to jekyll). Non-HTML URLs are captured verbatim. screenshot renders the
+    page to an asset (citation targets only; needs playwright)."""
     tgt = resolve_target(target)
     print(f"\n→ {url}")
-    try:
-        html, base_dir = load_source(url)
-    except Exception as e:
-        print(f"  ✗ Failed to load: {e}")
-        return _outcome("failed", reason=f"load: {e}")
+    if is_local_source(url):
+        try:
+            html, base_dir = load_source(url)
+        except Exception as e:
+            print(f"  ✗ Failed to load: {e}")
+            return _outcome("failed", reason=f"load: {e}")
+    else:
+        try:
+            resp = polite_get(url)
+        except Exception as e:
+            print(f"  ✗ Failed to load: {e}")
+            return _outcome("failed", reason=f"load: {e}")
+        base_dir = None
+        content_type = resp.headers.get("Content-Type", "")
+        if not _is_markup(content_type):
+            return capture_binary(resp.content, content_type, url, tgt)
+        html = resp.text
 
     soup = BeautifulSoup(html, "html.parser")
     soup = remove_wayback_toolbar(soup)
@@ -1506,6 +1603,15 @@ def process_url(url, platform=None, target=None):
         "cover": local_cover,
         "categories": categories,
     }
+
+    # Screenshots are evidence for citations: render the page to an asset and let the
+    # data target reference it. Best-effort; needs playwright.
+    if screenshot and tgt.get("emit"):
+        shot_dir = os.path.join(OUTPUT_DIR, tgt["asset_dir"](slug))
+        os.makedirs(shot_dir, exist_ok=True)
+        shot_name = f"{slug}-screenshot.png"
+        if screenshot_page(url, os.path.join(shot_dir, shot_name)):
+            meta["screenshot"] = tgt["asset_url"](slug, shot_name)
 
     written = _emit_source(
         tgt, doc_relpath, url, base_dir, resolved, slug, meta, markdown, md_footnotes
@@ -1648,7 +1754,13 @@ def main():
         default="jekyll",
         choices=sorted(set(TARGETS) | set(TARGET_ALIASES)),
         help="Output format/layout (default: jekyll). Accepts: jekyll (jk), "
-        "commonmark (cm, plain, md).",
+        "commonmark (cm, plain, md), data (citation objects).",
+    )
+    parser.add_argument(
+        "--screenshot",
+        action="store_true",
+        help="Render each page to a PNG and reference it from its citation "
+        "(--target data; needs playwright).",
     )
     parser.add_argument(
         "--clean",
@@ -1690,7 +1802,7 @@ def main():
         if is_markdown_source(src, md_mode):
             result = process_markdown(src, target)
         else:
-            result = process_url(src, platform, target)
+            result = process_url(src, platform, target, screenshot=args.screenshot)
         result = result or _outcome("failed", reason="no result")
         log_run(src, result, target)
         tally[result["status"]] = tally.get(result["status"], 0) + 1

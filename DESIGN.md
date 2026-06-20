@@ -101,11 +101,20 @@ resuming, never by pushing through blocks.
 ## Build sequence
 
 1. This design doc ✅
-2. **Output-target registry** — factor the Jekyll/kramdown emit tail out; `jekyll`
-   default (back-compat). Decision-light, unlocks everything below.
-3. **Citation Object** as the `data` target (`_data/sources/<id>.yml` + a `cite` include).
-4. **ProBoards adapter** + the *thread* content model (real fixture in hand).
-5. **txt** passthrough adapter.
-6. Discovery host-recovery + Save-Page-Now.
-7. Capture tier (raw + binary downloads) + screenshots (headless render).
-8. Polite-fetch layer (rate limit / Retry-After / concurrency) + JSONL run-log.
+2. **Output-target registry** — Jekyll/kramdown emit tail factored out; `jekyll`
+   default (back-compat). ✅
+3. **Citation Object** as the `data` target (`_data/sources/<id>.yml` + `cite` include). ✅
+4. **ProBoards adapter** + the *thread* content model. ✅
+5. **txt** passthrough adapter. ✅
+6. Discovery host-recovery + Save-Page-Now (`discover.py`). ✅
+7. Capture tier (binary/non-HTML capture) + screenshots (optional playwright). ✅
+8. Polite-fetch layer (`netpolite.py`: rate limit / Retry-After / backoff) + JSONL
+   run-log. ✅ (Sequential, so concurrency is bounded at 1.)
+
+### Possible next
+
+- Repo/dir rename to DeadHonestCitation.
+- Raw-HTML capture when no adapter matches (today: logged as `failed`, asks for
+  `--platform`).
+- Resume / retry-failed driven by the run-log.
+- `local`→`archived` upgrade and Save-Page-Now wired into the convert flow.
