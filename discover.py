@@ -84,6 +84,9 @@ def discover(domain, contains=None, status="200", mimetype="text/html", newest=F
         if not line:
             continue
         timestamp, original = line.split(" ", 1)
+        # Some captures store HTML-encoded ampersands in the URL (&amp;board=…);
+        # decode so the playback URL resolves to the right capture.
+        original = original.replace("&amp;", "&")
         rows.append((timestamp, original))
     return rows
 
