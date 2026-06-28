@@ -1,8 +1,5 @@
 # DeadHonestCitation — design
 
-> Working name: **DeadHonestCitation**. Repo is still `ghost-2-md` locally /
-> `obrien-k/ghost-2-jekyll` on GitHub; rename is a deliberate later step.
-
 ## Purpose
 
 DeadHonestCitation turns archived and locally-saved web sources into
@@ -94,10 +91,6 @@ resuming, never by pushing through blocks.
   both reading the SSG's data dir. Prior art: jekyll-scholar (BibTeX, plugin); ours is
   lighter and web-source-oriented.
 
-## Open decisions
-
-- **Repo/dir rename** to DeadHonestCitation — when.
-
 ## Build sequence
 
 1. This design doc ✅
@@ -113,7 +106,6 @@ resuming, never by pushing through blocks.
 
 ### Possible next
 
-- Repo/dir rename to DeadHonestCitation.
 - Raw-HTML capture when no adapter matches (today: logged as `failed`, asks for
   `--platform`).
 - Resume / retry-failed driven by the run-log.

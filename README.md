@@ -1,10 +1,10 @@
-# archive-2-md
+# DeadHonestCitation
 
 Convert archived web pages — captured on the [Wayback Machine](https://web.archive.org/), saved to disk, or written in Word — into Markdown, deterministically and without rewriting the prose.
 
 The tool is **platform-agnostic** on both ends. A registry of *input adapters* teaches it how to read each source CMS, theme, or format; five ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, **Word `.docx`**, and **ProBoards** forum threads. A symmetric registry of *output targets* decides how results are written — **Jekyll** ([kramdown](https://kramdown.gettalong.org/)-friendly front matter, the default), **CommonMark**, or a **data** target that emits provenance-stamped citation objects. Adding either end is a single registry entry.
 
-> Working name: **DeadHonestCitation**. The repository is still `ghost-2-md` for historical reasons — it started as a Ghost-only exporter and grew into a general archive→Markdown converter. The rename will land once the shape settles.
+> **DeadHonestCitation** started life as `ghost-2-md`, a Ghost-only exporter, and grew into a general archive→Markdown converter with provenance-stamped citations.
 
 ## What it does
 
@@ -194,7 +194,7 @@ The **`data`** target writes each source as a citation rather than a post:
 - `_sources/<id>.md` — the extracted content
 - `_includes/cite.html` — a plugin-free Jekyll include, shipped once
 
-Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs `playwright` — `pip install playwright && playwright install chromium`). See `DESIGN.md` for the citation object and the rest of the direction.
+Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs `playwright` — `pip install playwright && playwright install chromium`). See [`docs/DESIGN.md`](docs/DESIGN.md) for the citation object and the rest of the direction.
 
 A source that isn't convertible HTML — a PDF, image, or other binary — is **captured verbatim** (saved as an asset, recorded with a reference) rather than dropped, so a run preserves everything it touches. Each source's outcome (converted / captured / skipped / failed) is appended to `output/runlog.jsonl`.
 
@@ -217,7 +217,7 @@ python to_jekyll.py menu
 ```
 
 The target repo and injected source tag default from the environment — set
-`ARCHIVE2MD_JEKYLL_REPO` and `ARCHIVE2MD_SOURCE_TAG`, or copy `.env.example` to
+`DHC_JEKYLL_REPO` and `DHC_SOURCE_TAG`, or copy `.env.example` to
 `.env` (gitignored) and fill it in. `--repo PATH` and `--tag` override per run.
 
 ### Guided wizard

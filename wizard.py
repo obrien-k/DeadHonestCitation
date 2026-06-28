@@ -65,7 +65,7 @@ def discard(path):
 
 
 def main():
-    print("=== ghost-2-md · guided converter ===\n")
+    print("=== DeadHonestCitation · guided converter ===\n")
     sources = resolve_sources(ask("Source (a .txt list, a folder of .html, or one URL/path): "))
     if not sources:
         print("No sources found.")
