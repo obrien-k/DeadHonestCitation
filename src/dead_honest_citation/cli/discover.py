@@ -17,7 +17,7 @@ def domain(
         str, typer.Argument(help="Domain to enumerate, e.g. example.com (no scheme).")
     ],
     contains: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--contains",
             "-c",
@@ -35,9 +35,10 @@ def domain(
         typer.Option("--newest", help="Keep each URL's most recent capture (default: earliest)."),
     ] = False,
     output: Annotated[
-        str, typer.Option("--output", "-o", help="Write URLs to this file instead of stdout.")
+        str | None,
+        typer.Option("--output", "-o", help="Write URLs to this file instead of stdout."),
     ] = None,
-):
+) -> None:
     """Enumerate a known domain's archived captures (prints convert sources, one per line).
 
     Note on title matching: CDX exposes the captured URL, timestamp, status and
@@ -79,10 +80,10 @@ def domain(
 def recover(
     name: Annotated[str, typer.Argument(help="Remembered site name to recover a host for.")],
     on: Annotated[
-        list[str],
+        list[str] | None,
         typer.Option("--on", help="Extra hosting domain(s) to probe (repeatable)."),
     ] = None,
-):
+) -> None:
     """Recover an unknown host from a remembered name, by probing common hosting
     platforms (and any --on DOMAIN) for an archived and/or live host."""
     domains = list(on) if on else wayback.COMMON_HOSTS
@@ -108,7 +109,7 @@ def recover(
 @discover_app.command()
 def save(
     url: Annotated[str, typer.Argument(help="Live URL to archive via Save Page Now.")],
-):
+) -> None:
     """Save Page Now: archive a live-but-unarchived URL and print its new permalink.
     NOTE: this publishes a public snapshot."""
     try:

@@ -13,7 +13,7 @@ _REPO_OPTION = typer.Option("--repo", help="Jekyll repo path (default: $DHC_JEKY
 
 def stage(
     files: Annotated[
-        list[str], typer.Argument(help="Post .md files (default: all of output/_posts/).")
+        list[str] | None, typer.Argument(help="Post .md files (default: all of output/_posts/).")
     ] = None,
     repo: Annotated[str, _REPO_OPTION] = config.DEFAULT_REPO,
     tag: Annotated[
@@ -26,7 +26,7 @@ def stage(
     force: Annotated[
         bool, typer.Option("--force", help="Overwrite an existing destination file.")
     ] = False,
-):
+) -> None:
     """Copy converted posts into the repo's _drafts/ (or _posts/ with --to-posts),
     injecting a source tag and copying each post's image assets."""
     files = files or sorted(glob.glob(os.path.join(config.OUT_POSTS, "*.md")))
@@ -44,7 +44,7 @@ def stage(
 def promote(
     slug: Annotated[str, typer.Argument(help="Draft slug (filename without .md).")],
     repo: Annotated[str, _REPO_OPTION] = config.DEFAULT_REPO,
-):
+) -> None:
     """Move a draft into _posts/ by its front-matter date."""
     dest = staging.promote_one(slug, repo)
     if dest is None:
@@ -53,7 +53,7 @@ def promote(
     print(f"✓ promoted: _drafts/{slug}.md → {os.path.relpath(dest, repo)}")
 
 
-def run_menu(repo):
+def run_menu(repo: str) -> None:
     """List drafts and interactively promote a chosen subset into _posts.
     Shared by `dhc menu` and the wizard."""
     drafts = sorted(glob.glob(os.path.join(repo, "_drafts", "*.md")))
@@ -76,11 +76,14 @@ def run_menu(repo):
     for i in idxs:
         slug = os.path.basename(drafts[i - 1])[:-3]
         dest = staging.promote_one(slug, repo)
+        if dest is None:
+            print(f"  ✗ {slug} — draft vanished, skipped")
+            continue
         print(f"  ✓ {slug} → {os.path.relpath(dest, repo)}")
 
 
 def menu(
     repo: Annotated[str, _REPO_OPTION] = config.DEFAULT_REPO,
-):
+) -> None:
     """Interactively list drafts and promote a chosen subset into _posts/."""
     run_menu(repo)

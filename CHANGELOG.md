@@ -20,6 +20,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Python floor is now **3.11**; dependencies moved from `requirements.txt` into
   `pyproject.toml`, with `docx`, `screenshot`, and `dev` extras (`mammoth` and
   `playwright` stay lazy imports). New runtime deps: `typer`, `rich`.
+- **Typed contracts throughout.** The adapter and target registries are now
+  `PlatformAdapter` / `OutputTarget` ABC subclasses; the metadata 6-tuple, the
+  outcome dicts, and the citation dict became `PostMetadata` / `Outcome` /
+  `Citation` dataclasses (`models.py`). Full PEP-484 annotations across the
+  package; `mypy --strict` runs clean and is configured in `pyproject.toml`
+  (dev extra now pulls the stub packages). Conversion output is byte-identical
+  (verified against `tests/fixtures/` across all five platforms).
 
 ### Added
 - **Forum original-post model.** A ProBoards source now yields the **original post

@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import unquote, urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from ..network.wayback import unwrap_wayback
 
@@ -20,18 +20,20 @@ AD_EMBED_HOSTS = (
 )
 
 
-def _anchor(href, text):
+def _anchor(href: str, text: str) -> Tag:
     """Build a standalone <a> tag so markdownify renders a proper Markdown link."""
     a = BeautifulSoup("", "html.parser").new_tag("a", href=href)
     a.string = text
     return a
 
 
-def recover_embed_url(src, base_dir):
-    """
-    A browser 'Save Page As' rewrites provider iframes (YouTube/Vimeo) to a local
-    '<id>.html' file under the page's _files dir. When src points at such a saved
-    file, read it and pull the original provider URL back out; otherwise return src.
+def recover_embed_url(src: str, base_dir: str | None) -> str:
+    """Recover a provider URL from a browser-localized embed.
+
+    A browser 'Save Page As' rewrites provider iframes (YouTube/Vimeo) to a
+    local '<id>.html' file under the page's _files dir. When src points at such
+    a saved file, read it and pull the original provider URL back out;
+    otherwise return src unchanged.
     """
     if not base_dir or src.startswith(("http://", "https://", "//")):
         return src
@@ -50,18 +52,22 @@ def recover_embed_url(src, base_dir):
     return unwrap_wayback(m.group(0)) if m else src
 
 
-def convert_embeds(article, base_dir=None):
-    """
-    Replace <iframe>/<embed>/<object> media with Markdown-friendly equivalents so
-    it survives the HTML→Markdown step (markdownify drops these tags outright).
-    Known providers (YouTube, Vimeo) become labeled links; ad/Flash junk is dropped
-    silently. Anything that can't be faithfully represented without a plugin is kept
-    as a best-effort link AND recorded as a note for the user to resolve from their
-    _drafts/ folder. Returns (article, notes).
+def convert_embeds(article: Tag, base_dir: str | None = None) -> tuple[Tag, list[str]]:
+    """Replace <iframe>/<embed>/<object> media with Markdown-friendly equivalents.
+
+    Runs before the HTML→Markdown step, which drops these tags outright. Known
+    providers (YouTube, Vimeo) become labeled links; ad/Flash junk is dropped
+    silently. Anything that can't be faithfully represented without a plugin is
+    kept as a best-effort link AND recorded as a note for the user to resolve,
+    as are WordPress shortcodes.
+
+    Returns:
+        (article, notes) — the rewritten body and the NEEDS-REVIEW notes.
     """
     notes = []
     for tag in article.find_all(["iframe", "embed", "object"]):
-        src = unwrap_wayback(tag.get("src") or tag.get("data") or "")
+        raw = tag.get("src") or tag.get("data") or ""
+        src = unwrap_wayback(raw) if isinstance(raw, str) else ""
         if not src:
             tag.decompose()
             continue

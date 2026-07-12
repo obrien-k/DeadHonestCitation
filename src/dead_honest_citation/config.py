@@ -17,7 +17,7 @@ OUT_POSTS = POSTS_DIR
 OUT_ASSETS = ASSETS_DIR
 
 
-def load_dotenv(path=None):
+def load_dotenv(path: str | None = None) -> None:
     """Populate os.environ from a simple KEY=VALUE .env file, without adding a
     dependency. Existing environment variables win; lines that are blank or start
     with '#' are ignored. Quotes around values are stripped."""

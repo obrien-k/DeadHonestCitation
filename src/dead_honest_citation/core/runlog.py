@@ -1,26 +1,26 @@
-"""Per-source outcome records and the append-only JSONL run log."""
+"""The append-only JSONL run log of per-source outcomes."""
 
 import json
 import os
 import time
 
 from ..config import OUTPUT_DIR, RUNLOG
+from ..models import Outcome
 
 
-def outcome(status, output=None, reason=None):
-    """A per-source result for the run log: status is converted / captured /
-    skipped / failed."""
-    return {"status": status, "output": output, "reason": reason}
+def log_run(url: str, result: Outcome, target: str) -> None:
+    """Append one source's outcome to output/runlog.jsonl.
 
-
-def log_run(url, result, target):
-    """Append one source's outcome to output/runlog.jsonl (an append-only audit log —
-    a record of coverage, not a database). Best-effort: never fail the run over it."""
+    An append-only audit log — a record of coverage, not a database.
+    Best-effort: never fail the run over it.
+    """
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "url": url,
         "target": target,
-        **result,
+        "status": result.status,
+        "output": result.output,
+        "reason": result.reason,
     }
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -11,6 +11,7 @@ Tunable via the environment:
 
 import os
 import time
+from typing import Any
 
 import requests
 
@@ -25,7 +26,7 @@ MAX_BACKOFF = 60.0
 _last_request = 0.0
 
 
-def _throttle():
+def _throttle() -> None:
     """Sleep just enough to keep at least MIN_INTERVAL between requests."""
     global _last_request
     wait = MIN_INTERVAL - (time.monotonic() - _last_request)
@@ -34,11 +35,11 @@ def _throttle():
     _last_request = time.monotonic()
 
 
-def _backoff(attempt):
+def _backoff(attempt: int) -> float:
     return min(2.0**attempt, MAX_BACKOFF)
 
 
-def _retry_after(resp, attempt):
+def _retry_after(resp: requests.Response, attempt: int) -> float:
     """Honor a Retry-After header (seconds) when present, else exponential backoff."""
     value = resp.headers.get("Retry-After")
     if value:
@@ -50,26 +51,43 @@ def _retry_after(resp, attempt):
 
 
 def polite_get(
-    url,
+    url: str,
     *,
-    method="GET",
-    params=None,
-    headers=None,
-    timeout=20,
-    allow_redirects=True,
-    retries=None,
-    raise_on_error=True,
-):
+    method: str = "GET",
+    params: Any = None,
+    headers: dict[str, str] | None = None,
+    timeout: float = 20,
+    allow_redirects: bool = True,
+    retries: int | None = None,
+    raise_on_error: bool = True,
+) -> requests.Response:
     """A rate-limited request with Retry-After handling and exponential backoff.
 
-    Returns the Response; with raise_on_error it raises requests.RequestException after
-    the final attempt (and on any 4xx/5xx). 429/503 are retried per Retry-After and
-    connection errors back off exponentially, so a transient throttle/refusal degrades
-    gracefully. Set raise_on_error=False when a non-2xx is a valid answer (e.g. a
-    liveness probe where 404 means "not live", not "retry")."""
+    429/503 are retried per Retry-After and connection errors back off
+    exponentially, so a transient throttle/refusal degrades gracefully.
+
+    Args:
+        url: The URL to request.
+        method: HTTP method (default GET).
+        params: Query parameters, as accepted by requests.
+        headers: Request headers (defaults to the polite User-Agent).
+        timeout: Per-attempt timeout in seconds.
+        allow_redirects: Follow redirects (default True).
+        retries: Attempts before giving up (default DHC_MAX_RETRIES).
+        raise_on_error: Raise on any 4xx/5xx and after the final attempt. Set
+            False when a non-2xx is a valid answer (e.g. a liveness probe where
+            404 means "not live", not "retry").
+
+    Returns:
+        The requests.Response.
+
+    Raises:
+        requests.RequestException: After the final failed attempt (and on any
+            4xx/5xx when raise_on_error is set).
+    """
     retries = retries or MAX_RETRIES
     hdrs = headers or HEADERS
-    last_exc = None
+    last_exc: requests.RequestException | None = None
     for attempt in range(retries):
         _throttle()
         try:

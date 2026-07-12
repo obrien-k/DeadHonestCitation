@@ -29,5 +29,5 @@ app.command()(clean)
 app.command()(prune)
 
 
-def main():
+def main() -> None:
     app()

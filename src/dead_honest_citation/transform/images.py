@@ -2,15 +2,25 @@
 
 import os
 import shutil
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
+
+from bs4 import Tag
 
 from ..config import OUTPUT_DIR
 from ..network.polite import polite_get
 from ..network.wayback import wayback_image_candidates
 
+if TYPE_CHECKING:
+    from ..targets import OutputTarget
 
-def download_image(url, post_img_dir):
-    """Download a single image to post_img_dir. Returns the local path, or None on failure."""
+
+def download_image(url: str, post_img_dir: str) -> str | None:
+    """Download a single image to post_img_dir.
+
+    Returns:
+        The local path, or None on failure.
+    """
     try:
         response = polite_get(url, timeout=15)
         filename = os.path.basename(urlparse(url).path) or "image"
@@ -23,46 +33,57 @@ def download_image(url, post_img_dir):
         return None
 
 
-def download_cover(cover_url, slug, target=None):
-    """Download the cover image and return its in-document URL, or '' on failure."""
+def download_cover(cover_url: str, slug: str, target: "OutputTarget | None" = None) -> str:
+    """Download the cover image.
+
+    Returns:
+        Its in-document URL, or "" on failure (or when there is no cover).
+    """
     if not cover_url:
         return ""
     target = target or _default_target()
-    post_img_dir = os.path.join(OUTPUT_DIR, target["asset_dir"](slug))
+    post_img_dir = os.path.join(OUTPUT_DIR, target.asset_dir(slug))
     os.makedirs(post_img_dir, exist_ok=True)
 
     for url in wayback_image_candidates(cover_url):
         local_path = download_image(url, post_img_dir)
         if local_path:
-            return target["asset_url"](slug, os.path.basename(local_path))
+            return target.asset_url(slug, os.path.basename(local_path))
 
     return ""
 
 
-def download_images(soup, slug, base_dir=None, target=None):
-    """
-    Download (or, for a local HTML export, copy) all images in the article and
-    rewrite their src to the active target's asset URLs. Skips already-localized ones.
+def download_images(
+    soup: Tag, slug: str, base_dir: str | None = None, target: "OutputTarget | None" = None
+) -> Tag:
+    """Localize all images in the article and rewrite their srcs.
 
-    base_dir, when set, is the directory of a saved HTML file; images whose src is
-    a relative path are copied straight out of its sibling "<name>_files/" folder
-    instead of being fetched over the network.
+    Downloads each image (or, for a local HTML export, copies it) and rewrites
+    its src to the active target's asset URL. Skips already-localized ones.
+
+    Args:
+        soup: The article body.
+        slug: The post's slug (names the asset folder).
+        base_dir: Directory of a saved HTML file; images whose src is a
+            relative path are copied straight out of its sibling
+            "<name>_files/" folder instead of being fetched over the network.
+        target: The active output target (defaults to jekyll).
     """
     target = target or _default_target()
-    post_img_dir = os.path.join(OUTPUT_DIR, target["asset_dir"](slug))
+    post_img_dir = os.path.join(OUTPUT_DIR, target.asset_dir(slug))
     os.makedirs(post_img_dir, exist_ok=True)
-    asset_root = target["asset_url"](slug, "")
+    asset_root = target.asset_url(slug, "")
 
     for img in soup.find_all("img"):
         src = img.get("src")
-        if not src or src.startswith(asset_root):
+        if not isinstance(src, str) or not src or src.startswith(asset_root):
             continue
 
         # 1. Local export: copy from the saved files-dir when src resolves on disk.
         if base_dir and not src.startswith(("http://", "https://", "//", "/web/")):
             copied = copy_local_image(src, base_dir, post_img_dir)
             if copied:
-                img["src"] = target["asset_url"](slug, os.path.basename(copied))
+                img["src"] = target.asset_url(slug, os.path.basename(copied))
                 continue
             # else fall through: the local file is missing (a cross-origin asset the
             # browser never fetched), so try the real URLs in srcset / data-* below.
@@ -74,7 +95,7 @@ def download_images(soup, slug, base_dir=None, target=None):
             for url in wayback_image_candidates(candidate):
                 local_path = download_image(url, post_img_dir)
                 if local_path:
-                    img["src"] = target["asset_url"](slug, os.path.basename(local_path))
+                    img["src"] = target.asset_url(slug, os.path.basename(local_path))
                     localized = True
                     break
             if localized:
@@ -93,18 +114,24 @@ def download_images(soup, slug, base_dir=None, target=None):
     return soup
 
 
-def image_source_urls(img):
+def image_source_urls(img: Tag) -> list[str]:
+    """Ordered real (http) URLs to try for an <img>.
+
+    The inline src, then srcset candidates (largest width first), then common
+    lazy-load data-* attributes. Used as a fallback when a locally saved page's
+    inline src is a dead path — the browser typically leaves the original URL
+    behind in srcset.
     """
-    Ordered real (http) URLs to try for an <img>: the inline src, then srcset
-    candidates (largest width first), then common lazy-load data-* attributes.
-    Used as a fallback when a locally saved page's inline src is a dead path — the
-    browser typically leaves the original URL behind in srcset.
-    """
+
+    def str_attr(name: str) -> str:
+        v = img.get(name)
+        return v if isinstance(v, str) else ""
+
     urls = []
-    src = img.get("src", "")
+    src = str_attr("src")
     if src.startswith(("http://", "https://", "//", "/web/")):
         urls.append(src)
-    srcset = img.get("srcset", "")
+    srcset = str_attr("srcset")
     if srcset:
         entries = []
         for part in srcset.split(","):
@@ -119,7 +146,7 @@ def image_source_urls(img):
                 entries.append((width, bits[0]))
         urls += [u for _, u in sorted(entries, reverse=True)]
     for attr in ("data-orig-file", "data-large-file", "data-src", "data-lazy-src"):
-        v = img.get(attr, "")
+        v = str_attr(attr)
         if v.startswith(("http", "//", "/web/")):
             urls.append(v)
     seen, ordered = set(), []
@@ -130,9 +157,12 @@ def image_source_urls(img):
     return ordered
 
 
-def copy_local_image(src, base_dir, post_img_dir):
-    """Copy an image referenced by a saved HTML page into post_img_dir. Returns the
-    destination path, or None if the source file can't be found on disk."""
+def copy_local_image(src: str, base_dir: str, post_img_dir: str) -> str | None:
+    """Copy an image referenced by a saved HTML page into post_img_dir.
+
+    Returns:
+        The destination path, or None if the source file can't be found on disk.
+    """
     rel = unquote(src.split("?")[0].split("#")[0])
     candidate = os.path.normpath(os.path.join(base_dir, rel))
     if not os.path.isfile(candidate):
@@ -147,7 +177,7 @@ def copy_local_image(src, base_dir, post_img_dir):
         return None
 
 
-def _default_target():
+def _default_target() -> "OutputTarget":
     # Imported lazily: targets is a consumer of this module's siblings, and the
     # default only matters for direct library calls (the pipeline always passes one).
     from ..targets import resolve_target

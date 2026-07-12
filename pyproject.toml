@@ -23,7 +23,15 @@ dependencies = [
 # Heavy converters stay optional; the modules import them lazily.
 docx = ["mammoth>=1.8"]
 screenshot = ["playwright>=1.45"]
-dev = ["pytest>=8.0", "responses>=0.25", "mypy>=1.10", "ruff>=0.5"]
+dev = [
+    "pytest>=8.0",
+    "responses>=0.25",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "types-requests",
+    "types-python-dateutil",
+    "types-python-slugify",
+]
 
 [project.scripts]
 dhc = "dead_honest_citation.cli:main"
@@ -49,3 +57,13 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+# No published stubs; imported lazily or at one seam each.
+module = ["markdownify", "mammoth", "mammoth.*", "playwright.*"]
+ignore_missing_imports = true

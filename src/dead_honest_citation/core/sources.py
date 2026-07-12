@@ -5,6 +5,7 @@ untouched; this layer only decides *what to feed* the per-source pipeline.
 """
 
 import os
+from collections.abc import Iterable
 
 from ..adapters.docx import docx_to_html
 from ..network.polite import polite_get
@@ -16,14 +17,14 @@ SOURCE_EXTS = (".html", ".htm", ".docx")
 MD_EXTS = (".md", ".markdown")
 
 
-def is_local_source(src):
+def is_local_source(src: str) -> bool:
     """True if src is a local HTML file to read rather than a URL to fetch."""
     if src.startswith(("http://", "https://")):
         return False
     return src.lower().endswith(SOURCE_EXTS) or os.path.exists(os.path.expanduser(src))
 
 
-def is_markdown_source(src, md_mode=False):
+def is_markdown_source(src: str, md_mode: bool = False) -> bool:
     """True if a source should be handled as Markdown/plain-text passthrough."""
     if src.startswith(("http://", "https://")):
         return False
@@ -31,16 +32,16 @@ def is_markdown_source(src, md_mode=False):
     return low.endswith(MD_EXTS) or (md_mode and low.endswith(".txt"))
 
 
-def fetch(url):
-    """Fetch a page through the shared polite layer (rate limit + backoff + Retry-After)."""
-    return polite_get(url)
+def load_source(src: str) -> tuple[str, str | None]:
+    """Load a source's raw HTML.
 
+    Args:
+        src: A local file path or an http(s) URL.
 
-def load_source(src):
-    """
-    Return (html_text, base_dir) for a source. For a local file, base_dir is its
-    directory, used to resolve the sibling "<name>_files/" asset folder; for a URL,
-    base_dir is None and the page is fetched over the network.
+    Returns:
+        (html_text, base_dir). For a local file, base_dir is its directory,
+        used to resolve the sibling "<name>_files/" asset folder; for a URL,
+        base_dir is None and the page is fetched over the network.
     """
     if is_local_source(src):
         path = os.path.expanduser(src)
@@ -48,10 +49,10 @@ def load_source(src):
             return docx_to_html(path)
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read(), os.path.dirname(os.path.abspath(path))
-    return fetch(src).text, None
+    return polite_get(src).text, None
 
 
-def _dir_sources(directory, recursive, exts=SOURCE_EXTS):
+def _dir_sources(directory: str, recursive: bool, exts: tuple[str, ...] = SOURCE_EXTS) -> list[str]:
     """Every source file (matching exts) inside a directory, sorted.
 
     Saved-page asset folders ('<name>_files/') and dotfiles are skipped — they hold
@@ -72,7 +73,9 @@ def _dir_sources(directory, recursive, exts=SOURCE_EXTS):
     return sorted(found)
 
 
-def collect_sources(tokens, recursive=False, txt_as_content=False):
+def collect_sources(
+    tokens: Iterable[str], recursive: bool = False, txt_as_content: bool = False
+) -> list[str]:
     """Resolve CLI source tokens into a flat, de-duplicated work list.
 
     Each token is classified independently, so one run can mix input kinds:
@@ -83,7 +86,16 @@ def collect_sources(tokens, recursive=False, txt_as_content=False):
       - any other existing file → a *list file*: read it, one source per non-blank,
                                   non-'#' line (the classic urls.txt — .txt stays a
                                   list file unless txt_as_content)
-      - anything else          → reported missing and skipped"""
+      - anything else          → reported missing and skipped
+
+    Args:
+        tokens: The positional CLI source arguments.
+        recursive: Recurse into subdirectories of directory tokens.
+        txt_as_content: Treat .txt files as passthrough content, not list files.
+
+    Returns:
+        The de-duplicated sources in first-seen order.
+    """
     content_exts = SOURCE_EXTS + MD_EXTS + ((".txt",) if txt_as_content else ())
     sources = []
     for token in tokens:

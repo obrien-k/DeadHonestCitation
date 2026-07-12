@@ -32,16 +32,17 @@ COMMON_HOSTS = [
 ]
 
 
-def unwrap_wayback(url):
+def unwrap_wayback(url: str) -> str:
+    """The original URL inside a Wayback playback URL; non-Wayback URLs pass through."""
     m = WAYBACK_RE.match(url)
     return m.group(1) if m else url
 
 
-def wayback_image_candidates(src):
-    """
-    Given an image src (possibly a Wayback Machine URL), return the ordered list
-    of URLs to try when downloading: the archive's raw-image (`im_`) capture
-    first, then the bare original. Non-Wayback srcs are returned as-is.
+def wayback_image_candidates(src: str) -> list[str]:
+    """Ordered URLs to try when downloading an image src.
+
+    For a Wayback URL: the archive's raw-image (`im_`) capture first, then the
+    bare original. Non-Wayback srcs are returned as-is.
     """
     if src.startswith("/web/"):
         src = "https://web.archive.org" + src
@@ -56,20 +57,37 @@ def wayback_image_candidates(src):
     return [src, original]
 
 
-def wayback_raw(url):
+def wayback_raw(url: str) -> str:
     """Rewrite a Wayback URL to its toolbar-free 'if_' capture so a screenshot frames the
     page itself, not the archive chrome. Non-Wayback URLs pass through unchanged."""
     m = re.match(r"(https?://web\.archive\.org/web/\d+)(/https?://.+)", url)
     return f"{m.group(1)}if_{m.group(2)}" if m else url
 
 
-def discover(domain, contains=None, status="200", mimetype="text/html", newest=False, timeout=60):
-    """Return a list of (timestamp, original_url) for a domain's archived captures.
+def discover(
+    domain: str,
+    contains: str | None = None,
+    status: str | None = "200",
+    mimetype: str | None = "text/html",
+    newest: bool = False,
+    timeout: float = 60,
+) -> list[tuple[str, str]]:
+    """Enumerate a domain's archived captures via the CDX API.
 
-    One row per unique URL (CDX collapse=urlkey). contains, when set, keeps only
-    URLs whose canonical key contains that (lowercased) substring — applied
-    server-side as a CDX regex filter. newest swaps the kept capture from the
-    earliest to the latest snapshot of each URL."""
+    One row per unique URL (CDX collapse=urlkey).
+
+    Args:
+        domain: Bare host to enumerate (no scheme).
+        contains: Keep only URLs whose canonical key contains this (lowercased)
+            substring — applied server-side as a CDX regex filter.
+        status: HTTP status filter ("200" by default; None for any).
+        mimetype: Mimetype filter (text/html by default; None for any).
+        newest: Keep each URL's most recent capture instead of the earliest.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        (timestamp, original_url) pairs.
+    """
     params = [
         ("url", f"{domain}*"),
         ("fl", "timestamp,original"),
@@ -104,12 +122,12 @@ def discover(domain, contains=None, status="200", mimetype="text/html", newest=F
     return rows
 
 
-def wayback_url(timestamp, original):
+def wayback_url(timestamp: str, original: str) -> str:
     """Build the playback URL the convert pipeline knows how to fetch and de-archive."""
     return f"https://web.archive.org/web/{timestamp}/{original}"
 
 
-def host_latest_capture(host, timeout=30):
+def host_latest_capture(host: str, timeout: float = 30) -> str | None:
     """Most recent Wayback capture timestamp for a host, or None if never archived."""
     params = [
         ("url", host),
@@ -127,7 +145,7 @@ def host_latest_capture(host, timeout=30):
     return line.split()[0] if line else None
 
 
-def host_is_live(host, timeout=10):
+def host_is_live(host: str, timeout: float = 10) -> bool:
     """True if the host responds today (tries HTTPS then HTTP)."""
     for scheme in ("https://", "http://"):
         try:
@@ -139,11 +157,18 @@ def host_is_live(host, timeout=10):
     return False
 
 
-def recover(name, domains, timeout=30):
-    """Probe `name.<domain>` candidates; return [(host, latest_capture, is_live)] for
-    those that are archived and/or live. The dependency-free counterpart to a web
-    search when you remember a site's name but not its exact host. The shared polite
-    layer rate-limits the probe burst."""
+def recover(
+    name: str, domains: list[str], timeout: float = 30
+) -> list[tuple[str, str | None, bool]]:
+    """Probe `name.<domain>` candidates for an archived and/or live host.
+
+    The dependency-free counterpart to a web search when you remember a site's
+    name but not its exact host. The shared polite layer rate-limits the probe
+    burst.
+
+    Returns:
+        (host, latest_capture_timestamp, is_live) for each hit.
+    """
     results = []
     for domain in domains:
         host = f"{name}.{domain}"
@@ -154,9 +179,14 @@ def recover(name, domains, timeout=30):
     return results
 
 
-def save_page_now(url, timeout=120):
-    """Trigger a Wayback 'Save Page Now' capture of a live URL; return the new
-    archive permalink, or None. NOTE: this publishes a public snapshot."""
+def save_page_now(url: str, timeout: float = 120) -> str | None:
+    """Trigger a Wayback 'Save Page Now' capture of a live URL.
+
+    NOTE: this publishes a public snapshot.
+
+    Returns:
+        The new archive permalink, or None when the API returned no snapshot.
+    """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     resp = polite_get(SAVE_API + url, timeout=timeout)

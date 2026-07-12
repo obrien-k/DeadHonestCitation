@@ -8,8 +8,9 @@ from ..adapters import PLATFORM_ALIASES, PLATFORMS
 from ..config import RUNLOG
 from ..core.housekeeping import clean_output, prune_output
 from ..core.pipeline import process_markdown, process_url
-from ..core.runlog import log_run, outcome
+from ..core.runlog import log_run
 from ..core.sources import collect_sources, is_markdown_source
+from ..models import Outcome
 from ..targets import TARGET_ALIASES, TARGETS
 
 _PLATFORM_CHOICES = sorted(set(PLATFORMS) | set(PLATFORM_ALIASES))
@@ -18,7 +19,7 @@ _TARGET_CHOICES = sorted(set(TARGETS) | set(TARGET_ALIASES))
 
 def convert(
     sources: Annotated[
-        list[str],
+        list[str] | None,
         typer.Argument(
             help="One or more sources: a directory (every .html/.htm/.docx inside), a "
             "saved page (.html/.htm), a Word doc (.docx), a Wayback/live URL, or a "
@@ -35,7 +36,7 @@ def convert(
         ),
     ] = False,
     platform: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--platform",
             "-p",
@@ -91,7 +92,7 @@ def convert(
             "this also crawls the remaining paginated pages (archived/local stay single-page).",
         ),
     ] = False,
-):
+) -> None:
     """Convert archived/live web pages, saved HTML, Word docs, or loose Markdown
     into Markdown posts or provenance-stamped citation objects."""
     # Shorthand flags are sugar for --platform; an explicit --platform wins.
@@ -109,7 +110,8 @@ def convert(
         )
 
     # None ⇒ auto-detect per source from the page markup
-    platform = PLATFORM_ALIASES.get(platform, platform)
+    if platform is not None:
+        platform = PLATFORM_ALIASES.get(platform, platform)
     resolved_target = TARGET_ALIASES.get(target, target)
 
     source_list = collect_sources(sources or ["urls.txt"], recursive=recursive, txt_as_content=txt)
@@ -119,17 +121,16 @@ def convert(
 
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
     print(f"Processing {len(source_list)} source(s), {mode}, → {resolved_target}…")
-    tally = {}
+    tally: dict[str, int] = {}
     for src in source_list:
         if is_markdown_source(src, txt):
-            result = process_markdown(src, resolved_target)
+            result: Outcome = process_markdown(src, resolved_target)
         else:
             result = process_url(
                 src, platform, resolved_target, screenshot=screenshot, full_thread=full_thread
             )
-        result = result or outcome("failed", reason="no result")
         log_run(src, result, resolved_target)
-        tally[result["status"]] = tally.get(result["status"], 0) + 1
+        tally[result.status] = tally.get(result.status, 0) + 1
 
     summary = ", ".join(f"{n} {status}" for status, n in sorted(tally.items()))
     print(f"\nDone — {summary or 'nothing processed'}.")
@@ -138,11 +139,11 @@ def convert(
 
 def clean(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
-):
+) -> None:
     """Delete all generated output (posts + assets)."""
     clean_output(assume_yes=yes)
 
 
-def prune():
+def prune() -> None:
     """Remove stale output (older slug duplicates, orphaned asset folders)."""
     prune_output()

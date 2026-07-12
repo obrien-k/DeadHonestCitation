@@ -64,9 +64,10 @@ dhc wizard
 dhc clean          # delete all of output/ (prompts; -y to skip the prompt)
 dhc prune          # drop stale output (older slug dupes, orphaned asset folders)
 
-# Lint / format (Ruff; config in pyproject.toml)
+# Lint / format / typecheck (config in pyproject.toml)
 ruff check .
 ruff format .
+mypy          # strict; covers src/
 ```
 
 The old script entry points (`python index.py`, `discover.py`, `to_jekyll.py`, `wizard.py`)
@@ -97,14 +98,15 @@ Package layout (each module's role):
 - `core/sources.py` — the input layer: `collect_sources()`, `load_source()`, extension
   classification (`SOURCE_EXTS`, `MD_EXTS`).
 - `core/capture.py` — the capture tier: `is_markup()`, `capture_binary()`.
-- `core/runlog.py` — `outcome()` records and the append-only `runlog.jsonl` writer.
+- `core/runlog.py` — the append-only `runlog.jsonl` writer (`log_run()` takes an `Outcome`).
 - `core/housekeeping.py` — `clean_output()`, `prune_output()`.
+- `models.py` — the shared dataclasses: `PostMetadata`, `Citation`, `Outcome`.
 - `adapters/` — the platform registry (`PLATFORMS`, `PLATFORM_ALIASES`, `detect_platform()`).
 - `transform/` — platform-independent HTML→MD machinery: `cleanup` (shared scrubbers),
   `images` (download/copy + src rewriting), `embeds`, `footnotes`, `frontmatter`
   (passthrough lifting), `encoding` (cp1252 C1 repair).
-- `targets/` — the target registry, `resolve_target()`, and `emit_source()` (the shared
-  writer dispatch); `targets/data.py` holds `derive_citation()` + the cite include.
+- `targets/` — the target registry and `resolve_target()`; writing dispatches through
+  each target's `write()`; `targets/data.py` holds `derive_citation()` + the cite include.
 - `network/polite.py` — the shared rate-limited HTTP layer (`polite_get()`: global minimum
   interval, Retry-After on 429/503, exponential backoff; tunable via `DHC_MIN_INTERVAL`/
   `DHC_MAX_RETRIES`). Module-global throttle state on purpose: one clock per process.
@@ -117,14 +119,15 @@ Package layout (each module's role):
 - `cli/` — the Typer app: `convert.py` (+ clean/prune), `discover.py` (sub-app),
   `stage.py` (stage/promote/menu), `wizard.py` (guided flow).
 
-**Adapters** — each `PLATFORMS[name]` entry supplies four pieces, so adding a CMS/theme
-means one `adapters/<name>.py` module plus one registry entry:
+**Adapters** — each `PLATFORMS[name]` entry is a `PlatformAdapter` subclass
+(`adapters/base.py` defines the ABC), so adding a CMS/theme means one
+`adapters/<name>.py` module plus one registry entry:
 - `detect(soup)` — recognizes the platform from page markup (used by `detect_platform()`)
-- `extract_metadata(soup)` — returns `(title, date, description, tags, cover, categories)`
+- `extract_metadata(soup)` — returns a `PostMetadata` dataclass (`models.py`)
 - `content` — a `(tag_name, attrs)` selector, **or a list of them tried in order**, locating the article body
 - `clean(article)` — platform-specific body cleanup pipeline
 
-`extract_metadata_ghost` reads Open Graph/meta tags. `extract_metadata_wordpress` is
+The Ghost adapter reads Open Graph/meta tags. The WordPress extraction is
 **generalized across WP themes**: each field resolves from the first source that works —
 title `.entry-title` → `og:title` → `h1`; date `<meta article:published_time>` →
 `<time datetime>` → `.post-date`/`.entry-date` text; tags from yaaburnee `tag-*` classes;
@@ -157,10 +160,12 @@ post and, for a live thread, crawls later pages (`proboards_collect()`). A forum
 also gets an automatic banner→first-post screenshot as its cover/citation evidence.
 `kind` is `thread`.
 
-**Output targets** — each `TARGETS[name]` entry supplies `doc_relpath`/`asset_dir`/
-`asset_url`/`front_matter`/`flavor`, or an `emit` hook to write something other than a
-single document. The conversion core produces `(metadata, body, assets)` and stays
-target-agnostic; `targets.emit_source()` dispatches. The **`data`** target
+**Output targets** — each `TARGETS[name]` entry is an `OutputTarget` subclass
+(`targets/base.py`): `doc_relpath`/`asset_dir`/`asset_url`/`flavor` plus a `write()`
+hook — `DocumentTarget` subclasses supply `front_matter()` and inherit the document
+writer; citation targets override `write()` outright (`is_citation` drives the
+pipeline's cover/screenshot handling). The conversion core produces
+`(PostMetadata, body, assets)` and stays target-agnostic; `target.write()` dispatches. The **`data`** target
 (`emit_citation`) writes a **citation object** per source — `_data/sources/<id>.yml` +
 `_sources/<id>.md` + a shipped plugin-free `_includes/cite.html` — with **honest
 provenance** (`derive_citation`): `archived` (Wayback permalink + snapshot date), `live`

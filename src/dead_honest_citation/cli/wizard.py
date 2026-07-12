@@ -11,6 +11,7 @@ import glob
 import os
 import re
 import shutil
+from typing import Any
 
 from .. import config, staging
 from ..adapters import PLATFORM_ALIASES
@@ -18,14 +19,14 @@ from ..core.pipeline import process_url
 from .stage import run_menu
 
 
-def ask(prompt, default=""):
+def ask(prompt: str, default: str = "") -> str:
     try:
         return input(prompt).strip() or default
     except EOFError:
         return default
 
 
-def resolve_sources(raw):
+def resolve_sources(raw: str) -> list[str]:
     """Turn the user's answer into a list of source lines (URLs or local paths)."""
     raw = os.path.expanduser(raw)
     if os.path.isdir(raw):
@@ -36,7 +37,7 @@ def resolve_sources(raw):
     return [raw] if raw else []
 
 
-def post_summary(path):
+def post_summary(path: str) -> dict[str, Any]:
     """A compact (title, date, words, links, images) summary of an output post."""
     text = open(path, encoding="utf-8").read()
     fm = re.match(r"^---\n.*?\n---\n(.*)$", text, re.S)
@@ -52,7 +53,7 @@ def post_summary(path):
     }
 
 
-def discard(path):
+def discard(path: str) -> None:
     """Delete an output post and its asset folder (a skipped review)."""
     slug = staging.split_name(path)[1]
     if os.path.isfile(path):
@@ -62,7 +63,7 @@ def discard(path):
         shutil.rmtree(assets, ignore_errors=True)
 
 
-def wizard():
+def wizard() -> None:
     """Guided interactive flow: pick source → convert → review each → stage/promote."""
     print("=== DeadHonestCitation · guided converter ===\n")
     sources = resolve_sources(ask("Source (a .txt list, a folder of .html, or one URL/path): "))

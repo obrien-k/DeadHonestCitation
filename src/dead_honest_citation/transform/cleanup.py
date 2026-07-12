@@ -2,13 +2,19 @@
 
 import re
 
+from bs4 import Tag
+from bs4.element import AttributeValueList
 
-def clean_ghost_classes(soup):
+
+def clean_ghost_classes(soup: Tag) -> Tag:
     """Strip Ghost/Koenig CSS classes and data attributes from all tags."""
     for tag in soup.find_all(True):
-        if tag.has_attr("class"):
-            tag["class"] = [c for c in tag["class"] if not c.startswith(("gh-", "kg-"))]
-            if not tag["class"]:
+        classes = tag.get("class")
+        if isinstance(classes, list):
+            kept = [c for c in classes if not c.startswith(("gh-", "kg-"))]
+            if kept:
+                tag["class"] = AttributeValueList(kept)
+            else:
                 del tag["class"]
         for attr in ("data-ghost", "data-kg"):
             if tag.has_attr(attr):
@@ -16,9 +22,9 @@ def clean_ghost_classes(soup):
     return soup
 
 
-def normalize_headings(soup):
-    """
-    Demote any h1 tags after the first to h2.
+def normalize_headings(soup: Tag) -> Tag:
+    """Demote any h1 tags after the first to h2.
+
     Ghost posts often have a second h1 inside the article body.
     """
     h1s = soup.find_all("h1")
@@ -28,13 +34,14 @@ def normalize_headings(soup):
     return soup
 
 
-def clean_wordpress_cruft(soup):
-    """
-    Strip WordPress chrome that adds no editorial value: share bars, related-post
-    blocks, comment threads, and leftover scripts/styles. Covers the yaaburnee
-    theme (Kiwi share bars, related-article blocks) plus the share/related plugins
-    common across generic WP themes (Jetpack/Sharedaddy, jp-relatedposts). Harmless
-    on content that has none of these.
+def clean_wordpress_cruft(soup: Tag) -> Tag:
+    """Strip WordPress chrome that adds no editorial value.
+
+    Share bars, related-post blocks, comment threads, and leftover
+    scripts/styles. Covers the yaaburnee theme (Kiwi share bars,
+    related-article blocks) plus the share/related plugins common across
+    generic WP themes (Jetpack/Sharedaddy, jp-relatedposts). Harmless on
+    content that has none of these.
     """
     # Exact theme/plugin block classes to drop wholesale.
     for selector in (
@@ -62,10 +69,8 @@ def clean_wordpress_cruft(soup):
     return soup
 
 
-def remove_wayback_toolbar(soup):
-    """
-    Strip the Wayback Machine toolbar injected at the top of archived pages.
-    """
+def remove_wayback_toolbar(soup: Tag) -> Tag:
+    """Strip the Wayback Machine toolbar injected at the top of archived pages."""
     for el in soup.find_all(id=re.compile(r"^wm-")):
         el.decompose()
     for el in soup.find_all("div", class_=re.compile(r"wb_")):

@@ -57,12 +57,12 @@ src/dead_honest_citation/
   cli/            # the Typer app behind `dhc`
 ```
 
-The converter is built around a **platform adapter registry** (`adapters.PLATFORMS`). Each adapter supplies four pieces, so supporting a new CMS/theme/format means adding one entry plus its module — no changes to the processing pipeline:
+The converter is built around a **platform adapter registry** (`adapters.PLATFORMS`) of `PlatformAdapter` subclasses (the ABC lives in `adapters/base.py`; output targets have a symmetric `OutputTarget` ABC in `targets/base.py`). Each adapter supplies four pieces, so supporting a new CMS/theme/format means adding one subclass plus its registry entry — no changes to the processing pipeline:
 
 | Piece | Responsibility |
 |-------|----------------|
 | `detect(soup)` | Recognize the platform from page markup (drives auto-detection) |
-| `extract_metadata(soup)` | Return `(title, date, description, tags, cover, categories)` |
+| `extract_metadata(soup)` | Return a `PostMetadata` dataclass (title, date, description, tags, cover, categories) |
 | `content` | A `(tag_name, attrs)` selector — or a list tried in order — locating the article body |
 | `clean(article)` | Platform-specific body-cleanup pipeline |
 
@@ -94,8 +94,8 @@ The pipeline in `core.pipeline.process_url()` is platform-neutral — it calls i
 
 ### Adding a platform
 
-1. Write an `adapters/<name>.py` with `detect_<name>(soup)`, `extract_metadata_<name>(soup)`, and `clean_content_<name>(article)`.
-2. Register them in `adapters.PLATFORMS` with a `content` selector.
+1. Write an `adapters/<name>.py` with a `PlatformAdapter` subclass (`detect` / `extract_metadata` / `clean` methods and a `content` selector).
+2. Register an instance in `adapters.PLATFORMS`.
 3. (Optional) add CLI aliases in `PLATFORM_ALIASES`.
 
 Auto-detection and the `--platform` flag pick the new adapter up automatically.
@@ -260,6 +260,7 @@ dhc prune   # drop stale output: older slug duplicates + orphaned asset folders
 pip install -e ".[dev]"
 ruff check .       # lint
 ruff format .      # format
+mypy               # strict type-check (src/)
 ```
 
 Configuration lives in `pyproject.toml`. There are no automated tests yet (a pytest suite is planned; `tests/fixtures/` holds the offline sample pages).

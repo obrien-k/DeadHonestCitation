@@ -22,7 +22,7 @@ DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$")
 FM_RE = re.compile(r"^---\n(.*?)\n---\n", re.S)
 
 
-def split_name(path):
+def split_name(path: str) -> tuple[str | None, str]:
     """Return (date_or_None, slug) parsed from a YYYY-MM-DD-slug.md filename."""
     name = os.path.basename(path)
     m = DATE_RE.match(name)
@@ -31,12 +31,12 @@ def split_name(path):
     return None, re.sub(r"\.md$", "", name)
 
 
-def front_matter_date(text):
+def front_matter_date(text: str) -> str | None:
     m = re.search(r"^date:\s*(\d{4}-\d{2}-\d{2})", text, re.M)
     return m.group(1) if m else None
 
 
-def inject_tag(text, tag):
+def inject_tag(text: str, tag: str) -> str:
     """Add `tag` to the YAML tags: block (creating the block if absent)."""
     if not tag:
         return text
@@ -57,7 +57,7 @@ def inject_tag(text, tag):
     return text[: fm.start()] + "---\n" + "\n".join(out) + "\n---\n" + text[fm.end() :]
 
 
-def copy_assets(slug, repo):
+def copy_assets(slug: str, repo: str) -> int:
     src = os.path.join(OUT_ASSETS, slug)
     if not os.path.isdir(src):
         return 0
@@ -70,7 +70,13 @@ def copy_assets(slug, repo):
     return n
 
 
-def stage_one(path, repo, tag=DEFAULT_TAG, to_posts=False, force=False):
+def stage_one(
+    path: str,
+    repo: str,
+    tag: str = DEFAULT_TAG,
+    to_posts: bool = False,
+    force: bool = False,
+) -> tuple[str | None, int]:
     """Stage one converted post into repo/_drafts (or _posts with to_posts), injecting
     the tag and copying assets. Returns (dest_path, asset_count), or (None, 0) if the
     destination already exists and force is False."""
@@ -91,7 +97,7 @@ def stage_one(path, repo, tag=DEFAULT_TAG, to_posts=False, force=False):
     return dest, copy_assets(slug, repo)
 
 
-def promote_one(slug, repo):
+def promote_one(slug: str, repo: str) -> str | None:
     """Move repo/_drafts/<slug>.md → repo/_posts/<date>-<slug>.md (date from front
     matter). Returns the destination path, or None if no such draft exists."""
     src = os.path.join(repo, "_drafts", f"{slug}.md")
@@ -105,12 +111,12 @@ def promote_one(slug, repo):
     return dest
 
 
-def parse_selection(sel, n):
+def parse_selection(sel: str, n: int) -> list[int]:
     """Parse '1,3 5', '2-4', or 'all' into a sorted list of 1-based indices in 1..n."""
     sel = sel.strip().lower()
     if sel in ("all", "*"):
         return list(range(1, n + 1))
-    picked = set()
+    picked: set[int] = set()
     for part in re.split(r"[,\s]+", sel):
         if "-" in part:
             a, b = part.split("-", 1)
