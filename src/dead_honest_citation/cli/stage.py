@@ -8,7 +8,7 @@ import typer
 
 from .. import config, staging
 
-_REPO_OPTION = typer.Option("--repo", help="Jekyll repo path (default: $ARCHIVE2MD_JEKYLL_REPO).")
+_REPO_OPTION = typer.Option("--repo", help="Jekyll repo path (default: $DHC_JEKYLL_REPO).")
 
 
 def stage(
@@ -18,9 +18,7 @@ def stage(
     repo: Annotated[str, _REPO_OPTION] = config.DEFAULT_REPO,
     tag: Annotated[
         str,
-        typer.Option(
-            "--tag", help='Source tag to inject (default: $ARCHIVE2MD_SOURCE_TAG; "" to skip).'
-        ),
+        typer.Option("--tag", help='Source tag to inject (default: $DHC_SOURCE_TAG; "" to skip).'),
     ] = config.DEFAULT_TAG,
     to_posts: Annotated[
         bool, typer.Option("--to-posts", help="Write straight to _posts/ with a date prefix.")

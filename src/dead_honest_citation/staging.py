@@ -8,7 +8,7 @@ Move converted posts from output/ into a Jekyll site repo.
            post's own front matter. This is the "trickle a draft into _posts" step.
 
 The Jekyll repo path and the injected source tag default from the environment —
-set ARCHIVE2MD_JEKYLL_REPO and ARCHIVE2MD_SOURCE_TAG, or drop them in a .env file
+set DHC_JEKYLL_REPO and DHC_SOURCE_TAG, or drop them in a .env file
 (see .env.example).
 """
 

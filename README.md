@@ -4,7 +4,7 @@ Convert archived web pages — captured on the [Wayback Machine](https://web.arc
 
 The tool is **platform-agnostic** on both ends. A registry of *input adapters* teaches it how to read each source CMS, theme, or format; five ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, **Word `.docx`**, and **ProBoards** forum threads. A symmetric registry of *output targets* decides how results are written — **Jekyll** ([kramdown](https://kramdown.gettalong.org/)-friendly front matter, the default), **CommonMark**, or a **data** target that emits provenance-stamped citation objects. Adding either end is a single registry entry.
 
-> The repository is still `ghost-2-md`/`ghost-2-jekyll` for historical reasons — it started as a Ghost-only exporter. The Python package is `dead_honest_citation` and the command is `dhc`.
+> Started as a Ghost-only exporter (`ghost-2-md`); renamed to **DeadHonestCitation** in v0.3.0. The Python package is `dead_honest_citation` and the command is `dhc`.
 
 ## What it does
 
@@ -217,7 +217,7 @@ The **`data`** target writes each source as a citation rather than a post:
 - `_sources/<id>.md` — the extracted content
 - `_includes/cite.html` — a plugin-free Jekyll include, shipped once
 
-Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs the `screenshot` extra). See `DESIGN.md` for the citation object and the rest of the direction.
+Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs the `screenshot` extra). See `docs/DESIGN.md` for the citation object and the rest of the direction.
 
 A source that isn't convertible HTML — a PDF, image, or other binary — is **captured verbatim** (saved as an asset, recorded with a reference) rather than dropped, so a run preserves everything it touches. Each source's outcome (converted / captured / skipped / failed) is appended to `output/runlog.jsonl`.
 
@@ -240,7 +240,7 @@ dhc menu
 ```
 
 The target repo and injected source tag default from the environment — set
-`ARCHIVE2MD_JEKYLL_REPO` and `ARCHIVE2MD_SOURCE_TAG`, or copy `.env.example` to
+`DHC_JEKYLL_REPO` and `DHC_SOURCE_TAG`, or copy `.env.example` to
 `.env` (gitignored) and fill it in. `--repo PATH` and `--tag` override per run.
 
 ### Guided wizard

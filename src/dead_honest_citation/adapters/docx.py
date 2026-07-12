@@ -69,7 +69,7 @@ def docx_to_html(path):
     """
     import mammoth  # lazy: only needed for .docx, keeps the dep optional otherwise
 
-    out_dir = tempfile.mkdtemp(prefix="ghost2md-docx-")
+    out_dir = tempfile.mkdtemp(prefix="dhc-docx-")
     with open(path, "rb") as f:
         result = mammoth.convert_to_html(
             f, convert_image=mammoth.images.img_element(_docx_image_handler(out_dir))
@@ -77,7 +77,7 @@ def docx_to_html(path):
     body = result.value
 
     title, author, created = read_docx_core_props(path)
-    meta = ['<meta name="generator" content="docx (ghost-2-md)">']
+    meta = ['<meta name="generator" content="docx (DeadHonestCitation)">']
     if title:
         meta.append(f'<meta property="og:title" content="{_esc(title)}">')
     if author:

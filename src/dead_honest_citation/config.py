@@ -36,5 +36,5 @@ def load_dotenv(path=None):
 
 load_dotenv()
 
-DEFAULT_REPO = os.path.expanduser(os.environ.get("ARCHIVE2MD_JEKYLL_REPO") or "~/jekyll-site")
-DEFAULT_TAG = os.environ.get("ARCHIVE2MD_SOURCE_TAG", "")
+DEFAULT_REPO = os.path.expanduser(os.environ.get("DHC_JEKYLL_REPO") or "~/jekyll-site")
+DEFAULT_TAG = os.environ.get("DHC_SOURCE_TAG", "")

@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Restructured into a `src/` package behind one CLI.** The flat scripts became
+  `src/dead_honest_citation/` — `core/` (pipeline, input layer, capture tier,
+  run-log, housekeeping), `adapters/` (one module per platform), `transform/`
+  (images, embeds, footnotes, cleanup, encoding repair), `targets/` (jekyll,
+  commonmark, data), `network/` (polite HTTP, Wayback, screenshots), `staging`,
+  and a Typer `cli/`. One entry point replaces the four scripts:
+  `dhc convert | discover | stage | promote | menu | wizard | clean | prune`
+  (installed by `pip install -e .`). The old scripts remain as deprecated shims
+  that translate their flags and delegate. Behavior-preserving: fixture
+  conversions (`tests/fixtures/`) are byte-identical to the pre-split outputs.
+- Python floor is now **3.11**; dependencies moved from `requirements.txt` into
+  `pyproject.toml`, with `docx`, `screenshot`, and `dev` extras (`mammoth` and
+  `playwright` stay lazy imports). New runtime deps: `typer`, `rich`.
+
 ### Added
 - **Forum original-post model.** A ProBoards source now yields the **original post
   only** by default — a forum citation is anchored to the OP, with the rest of the
@@ -25,6 +40,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `U+0092` — invisible mojibake that also made YAML front matter unparseable
   (`control characters are not allowed`). `fix_cp1252_controls()` remaps the
   `0x80–0x9F` range before parsing; it's a no-op on correctly-decoded UTF-8.
+
 ## [0.3.0] - 2026-06-20
 
 ### Changed
