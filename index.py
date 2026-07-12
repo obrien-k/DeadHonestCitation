@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 import zipfile
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 from bs4 import BeautifulSoup
@@ -824,11 +824,11 @@ def extract_metadata_proboards(soup):
     return (title or "ProBoards Thread", date, description, [], "", [])
 
 
-def clean_content_proboards(article):
-    """Rebuild the thread as attributed blocks: 'author — date' + the message body."""
+def _proboards_render(posts):
+    """Build attributed blocks ('author — date' + message blockquote) from parsed posts."""
     out = BeautifulSoup("<div></div>", "html.parser")
     div = out.div
-    for p in _proboards_posts(article):
+    for p in posts:
         head = out.new_tag("p")
         strong = out.new_tag("strong")
         strong.string = p["author"] or "Unknown"
@@ -841,6 +841,52 @@ def clean_content_proboards(article):
             quote.append(p["message"])
         div.append(quote)
     return div
+
+
+def _proboards_next_pages(root, base_url):
+    """Best-effort discovery of a *live* ProBoards thread's later-page URLs from its
+    pagination nav: anchors whose visible text is a bare page number ≥ 2. Returns
+    absolute URLs in page order, de-duplicated. Archived/local captures don't use this
+    (the Wayback snapshot rarely includes every page), so the thread stays single-page."""
+    seen, pages = set(), []
+    for a in root.find_all("a", href=True):
+        txt = a.get_text(strip=True)
+        if not txt.isdigit() or int(txt) < 2:
+            continue
+        href = urljoin(base_url, a["href"])
+        if href in seen:
+            continue
+        seen.add(href)
+        pages.append((int(txt), href))
+    return [href for _, href in sorted(pages)]
+
+
+def proboards_collect(root, url, base_dir, full_thread):
+    """Posts for a ProBoards source under the new forum model. Default: the original
+    post only — a forum citation is anchored to the OP, with the rest of the thread
+    available at the source. full_thread keeps every post on the page; and for a *live*
+    source it also crawls the remaining paginated pages (archived/local stay at 1)."""
+    posts = _proboards_posts(root)
+    if not full_thread:
+        return posts[:1]
+    is_live = base_dir is None and not WAYBACK_RE.match(url)
+    if is_live:
+        for page_url in _proboards_next_pages(root, url):
+            try:
+                html = fix_cp1252_controls(polite_get(page_url).text)
+            except Exception as e:
+                print(f"  ⚠ full-thread: could not fetch {page_url}: {e}")
+                break
+            posts.extend(_proboards_posts(BeautifulSoup(html, "html.parser")))
+    return posts
+
+
+def clean_content_proboards(article, full_thread=False):
+    """Rebuild a ProBoards thread as attributed blocks ('author — date' + message).
+    Default: the original post only; full_thread keeps every post on the page. (The
+    live paginated crawl lives in proboards_collect, which has the source URL.)"""
+    posts = _proboards_posts(article)
+    return _proboards_render(posts if full_thread else posts[:1])
 
 
 # Platform adapters: each registers how to detect the platform, find metadata,
@@ -1119,7 +1165,7 @@ def emit_citation(out_dir, slug, meta, markdown, footnotes, cite):
     if meta.get("screenshot"):
         lines.append(f"screenshot: {_yaml_str(meta['screenshot'])}")
     lines.append(f"content: {_yaml_str(content_rel)}")
-    lines.append('note: ""')
+    lines.append(f"note: {_yaml_str(meta.get('screenshot_note', ''))}")
 
     yml_rel = os.path.join("_data", "sources", f"{slug}.yml")
     yml_path = os.path.join(out_dir, yml_rel)
@@ -1490,10 +1536,19 @@ def capture_binary(content, content_type, url, tgt):
     return _outcome("captured", written, reason=kind)
 
 
-def screenshot_page(url, out_path, timeout=30000):
+def wayback_raw(url):
+    """Rewrite a Wayback URL to its toolbar-free 'if_' capture so a screenshot frames the
+    page itself, not the archive chrome. Non-Wayback URLs pass through unchanged."""
+    m = re.match(r"(https?://web\.archive\.org/web/\d+)(/https?://.+)", url)
+    return f"{m.group(1)}if_{m.group(2)}" if m else url
+
+
+def screenshot_page(url, out_path, end_selector=None, timeout=30000):
     """Render a page to a PNG with a headless browser. Returns True on success.
-    Playwright is imported lazily and is optional — like mammoth for .docx — so the
-    core install stays light; a screenshot just no-ops with a hint when it's absent."""
+    With end_selector, crop from the top of the page (the banner) down to the bottom of
+    the first matching element — the banner→first-post cover for a forum thread; without
+    it, a full-page shot. Playwright is imported lazily and optional — like mammoth for
+    .docx — so the core install stays light; it no-ops with a hint when absent."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -1504,9 +1559,20 @@ def screenshot_page(url, out_path, timeout=30000):
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
-            page = browser.new_page()
+            page = browser.new_page(viewport={"width": 1024, "height": 1400})
             page.goto(url, wait_until="networkidle", timeout=timeout)
-            page.screenshot(path=out_path, full_page=True)
+            clip = None
+            if end_selector:
+                el = page.query_selector(end_selector)
+                box = el.bounding_box() if el else None
+                if box:
+                    width = page.evaluate("document.documentElement.scrollWidth")
+                    clip = {"x": 0, "y": 0, "width": min(width, 1024), "height": box["y"] + box["height"]}
+                else:
+                    print("  ⚠ screenshot: first-post element not found, using full page")
+            page.screenshot(path=out_path, clip=clip) if clip else page.screenshot(
+                path=out_path, full_page=True
+            )
             browser.close()
         return True
     except Exception as e:
@@ -1514,7 +1580,7 @@ def screenshot_page(url, out_path, timeout=30000):
         return False
 
 
-def process_url(url, platform=None, target=None, screenshot=False):
+def process_url(url, platform=None, target=None, screenshot=False, full_thread=False):
     """Convert one source — a Wayback/live URL or a local HTML file. If platform is
     None, auto-detect it from the markup. target selects the output format/layout
     (defaults to jekyll). Non-HTML URLs are captured verbatim. screenshot renders the
@@ -1575,7 +1641,13 @@ def process_url(url, platform=None, target=None, screenshot=False):
         print("  ✗ No article content found — skipping.")
         return _outcome("skipped", reason="no article content")
 
-    article = adapter["clean"](article)
+    # Forum sources use the original-post model: keep the OP only unless --full-thread,
+    # which also crawls a live thread's later pages (proboards_collect needs the URL, so
+    # it's done here rather than in the registry's clean()).
+    if resolved == "proboards":
+        article = _proboards_render(proboards_collect(article, url, base_dir, full_thread))
+    else:
+        article = adapter["clean"](article)
 
     # When the platform supplied no description, derive one from the first paragraph
     if not description:
@@ -1621,9 +1693,22 @@ def process_url(url, platform=None, target=None, screenshot=False):
         "categories": categories,
     }
 
-    # Screenshots are evidence for citations: render the page to an asset and let the
-    # data target reference it. Best-effort; needs playwright.
-    if screenshot and tgt.get("emit"):
+    # A forum source gets a banner→first-post capture: the visual context of the original
+    # post. It's the post's cover image and doubles as citation evidence (described in the
+    # citation note). Automatic for the forum model, best-effort (needs playwright); the
+    # 'if_' raw capture keeps the Wayback toolbar out of frame.
+    if resolved == "proboards":
+        shot_dir = os.path.join(OUTPUT_DIR, tgt["asset_dir"](slug))
+        os.makedirs(shot_dir, exist_ok=True)
+        shot_name = f"{slug}-cover.png"
+        first_post = 'td[width="80%"].windowbg, td[width="80%"].windowbg2'
+        if screenshot_page(wayback_raw(url), os.path.join(shot_dir, shot_name), end_selector=first_post):
+            shot_url = tgt["asset_url"](slug, shot_name)
+            meta["cover"] = shot_url
+            meta["screenshot"] = shot_url
+            meta["screenshot_note"] = "Banner-to-first-post capture of the original forum thread."
+    # Other sources: an optional full-page evidence shot for citation targets.
+    elif screenshot and tgt.get("emit"):
         shot_dir = os.path.join(OUTPUT_DIR, tgt["asset_dir"](slug))
         os.makedirs(shot_dir, exist_ok=True)
         shot_name = f"{slug}-screenshot.png"
@@ -1780,6 +1865,13 @@ def main():
         "(--target data; needs playwright).",
     )
     parser.add_argument(
+        "--full-thread",
+        dest="full_thread",
+        action="store_true",
+        help="Forum sources: keep every post, not just the original. For a live thread "
+        "this also crawls the remaining paginated pages (archived/local stay single-page).",
+    )
+    parser.add_argument(
         "--clean",
         action="store_true",
         help="Delete all generated output (posts + assets) and exit.",
@@ -1819,7 +1911,9 @@ def main():
         if is_markdown_source(src, md_mode):
             result = process_markdown(src, target)
         else:
-            result = process_url(src, platform, target, screenshot=args.screenshot)
+            result = process_url(
+                src, platform, target, screenshot=args.screenshot, full_thread=args.full_thread
+            )
         result = result or _outcome("failed", reason="no result")
         log_run(src, result, target)
         tally[result["status"]] = tally.get(result["status"], 0) + 1

@@ -22,7 +22,7 @@ For each source it:
 - Converts HTML → Markdown (headings, links, tables, code blocks) and escapes `|` so kramdown won't misread link text as a table
 - Writes the result through the chosen output target (Jekyll post, CommonMark file, or a citation object)
 
-Forum threads use a *thread* content model: each post is preserved as an attributed `**author** — date` block with the message as a blockquote, rather than flattened into one article. Loose `.md`/`.txt` files pass through verbatim (no HTML round-trip). Re-runs are idempotent — outputs that already exist are skipped.
+Forum threads use a *thread* content model — each post is an attributed `**author** — date` block with the message as a blockquote, rather than flattened into one article. By default a forum source yields the **original post only** (the citation is anchored to the OP; the rest of the thread lives at the linked source); `--full-thread` keeps every post, and for a *live* thread crawls the remaining paginated pages too. A forum source is also captured banner-to-first-post as its cover image (and citation evidence). Loose `.md`/`.txt` files pass through verbatim (no HTML round-trip). Re-runs are idempotent — outputs that already exist are skipped.
 
 ## The pieces
 

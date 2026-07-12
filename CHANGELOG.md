@@ -6,6 +6,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Forum original-post model.** A ProBoards source now yields the **original post
+  only** by default — a forum citation is anchored to the OP, with the rest of the
+  thread available at the linked source. `--full-thread` restores every post on the
+  page and, for a *live* thread, crawls the remaining paginated pages too
+  (archived/local captures stay single-page, since a Wayback snapshot rarely includes
+  every page).
+- **Banner-to-first-post cover for forum sources.** The page is captured from the top
+  (banner) down to the bottom of the first post and used as the post's cover image,
+  doubling as citation evidence (described in the citation `note`). The Wayback `if_`
+  raw capture keeps the archive toolbar out of frame. Best-effort (needs playwright).
+
 ### Fixed
 - Windows-1252 punctuation (curly quotes, dashes, ellipsis) on pages served as
   `text/html` with no charset is no longer mis-decoded into C1 control characters.
