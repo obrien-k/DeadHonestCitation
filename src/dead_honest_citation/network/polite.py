@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 A small, shared, polite HTTP layer. Centralizes the rate-limit policy so the whole
 toolchain is a good citizen toward archive.org (a donor-funded nonprofit) and any
@@ -22,6 +21,7 @@ MIN_INTERVAL = float(os.environ.get("DHC_MIN_INTERVAL", "0.5"))
 MAX_RETRIES = int(os.environ.get("DHC_MAX_RETRIES", "4"))
 MAX_BACKOFF = 60.0
 
+# Module-global on purpose: one throttle clock per process, however many callers.
 _last_request = 0.0
 
 
