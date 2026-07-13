@@ -5,3 +5,9 @@ urls.txt
 .env
 .DS_Store
 .claude/
+
+# code-noobs Ghost recovery: raw export carries live secrets — never commit
+.scratch/
+
+# Python packaging build artifacts
+*.egg-info/

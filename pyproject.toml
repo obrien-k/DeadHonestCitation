@@ -1,6 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dead-honest-citation"
+version = "0.4.0"
+description = "Turn archived and locally-saved web sources into provenance-stamped, citable Markdown."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.12",
+    "markdownify>=0.13",
+    "python-slugify>=8.0",
+    "python-dateutil>=2.9",
+    "requests>=2.32",
+    "typer>=0.12",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+# Heavy converters stay optional; the modules import them lazily.
+docx = ["mammoth>=1.8"]
+screenshot = ["playwright>=1.45"]
+dev = [
+    "pytest>=8.0",
+    "responses>=0.25",
+    "mypy>=1.10",
+    "ruff>=0.5",
+    "types-requests",
+    "types-python-dateutil",
+    "types-python-slugify",
+]
+
+[project.scripts]
+dhc = "dead_honest_citation.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
-target-version = "py38"
+target-version = "py311"
 line-length = 100
+extend-exclude = ["tools"]
 
 [tool.ruff.lint]
 # A pragmatic set: pyflakes (F), pycodestyle errors (E) + warnings (W),
@@ -12,3 +54,16 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+# No published stubs; imported lazily or at one seam each.
+module = ["markdownify", "mammoth", "mammoth.*", "playwright.*"]
+ignore_missing_imports = true

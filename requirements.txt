@@ -1,15 +1,5 @@
-beautifulsoup4==4.14.3
-certifi==2026.2.25
-charset-normalizer==3.4.4
-cobble==0.1.4
-idna==3.11
-mammoth==1.12.0
-markdownify==1.2.2
-python-dateutil==2.9.0.post0
-python-slugify==8.0.4
-requests==2.32.5
-six==1.17.0
-soupsieve==2.8.3
-text-unidecode==1.3
-typing_extensions==4.15.0
-urllib3==2.6.3
+# Dependencies are declared in pyproject.toml now. Install the package instead:
+#   pip install -e .            # runtime only
+#   pip install -e ".[dev]"     # + pytest/responses/mypy/ruff
+#   pip install -e ".[docx,screenshot]"   # optional converters
+-e .[dev]

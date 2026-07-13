@@ -6,6 +6,70 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **A pytest suite** (`tests/`) covering the adapter registry (detection +
+  metadata/body extraction per platform), `collect_sources()`, both document
+  targets' front matter + `doc_relpath()`, the `data` target's `emit_citation`,
+  `derive_citation()`'s provenance rules, Wayback URL math + CDX/Save-Page-Now
+  discovery, the `PoliteSession` retry/backoff policy, and an end-to-end offline
+  conversion of the Ghost and Markdown fixtures through both document targets.
+  Entirely offline — HTTP is mocked with `responses`, the shared `PoliteSession`
+  throttle is neutralized for test speed — and runs in well under a second.
+- **Rich UX + resilience.** The package now speaks through a single Rich console
+  (`ui.py`): the semantic status glyphs (→ ✓ ✗ ⚠ ↷ ·) are color-coded, and
+  `dhc convert` wraps its source loop in a `rich.progress` bar that shares that
+  console so per-source lines interleave above it. The bar disables itself on
+  non-TTY output, so piped/captured runs stay clean and file outputs are
+  unchanged. A root `-v/--verbose` flag enables `logging` (RichHandler on stderr)
+  with per-request HTTP tracing.
+- **Exception hierarchy (`exceptions.py`).** `DHCError` base with `FetchError`,
+  `WaybackRateLimitError` (carries the last `Retry-After`; also a
+  `requests.RequestException` so discovery keeps catching it),
+  `PlatformDetectError`, `ContentNotFoundError`, and `EmitError`. These are
+  raised at the network/pipeline failure sites and caught at the
+  `process_url`/`process_markdown` boundary, which maps each to an `Outcome` — so
+  a batch never dies on one bad source and `runlog.jsonl` gets an actionable
+  reason. Exhausted 429/503 retries now raise `WaybackRateLimitError`.
+
+### Changed
+- **`network/polite.py` is now a `PoliteSession`.** The module globals became a
+  class holding the throttle clock and retry policy, with an explicit timeout on
+  every request; one shared module-level instance keeps the process-wide clock,
+  and `polite_get()` stays a thin wrapper (public API and `DHC_MIN_INTERVAL`/
+  `DHC_MAX_RETRIES` tunables unchanged).
+- **Restructured into a `src/` package behind one CLI.** The flat scripts became
+  `src/dead_honest_citation/` — `core/` (pipeline, input layer, capture tier,
+  run-log, housekeeping), `adapters/` (one module per platform), `transform/`
+  (images, embeds, footnotes, cleanup, encoding repair), `targets/` (jekyll,
+  commonmark, data), `network/` (polite HTTP, Wayback, screenshots), `staging`,
+  and a Typer `cli/`. One entry point replaces the four scripts:
+  `dhc convert | discover | stage | promote | menu | wizard | clean | prune`
+  (installed by `pip install -e .`). The old scripts remain as deprecated shims
+  that translate their flags and delegate. Behavior-preserving: fixture
+  conversions (`tests/fixtures/`) are byte-identical to the pre-split outputs.
+- Python floor is now **3.11**; dependencies moved from `requirements.txt` into
+  `pyproject.toml`, with `docx`, `screenshot`, and `dev` extras (`mammoth` and
+  `playwright` stay lazy imports). New runtime deps: `typer`, `rich`.
+- **Typed contracts throughout.** The adapter and target registries are now
+  `PlatformAdapter` / `OutputTarget` ABC subclasses; the metadata 6-tuple, the
+  outcome dicts, and the citation dict became `PostMetadata` / `Outcome` /
+  `Citation` dataclasses (`models.py`). Full PEP-484 annotations across the
+  package; `mypy --strict` runs clean and is configured in `pyproject.toml`
+  (dev extra now pulls the stub packages). Conversion output is byte-identical
+  (verified against `tests/fixtures/` across all five platforms).
+
+### Added
+- **Forum original-post model.** A ProBoards source now yields the **original post
+  only** by default — a forum citation is anchored to the OP, with the rest of the
+  thread available at the linked source. `--full-thread` restores every post on the
+  page and, for a *live* thread, crawls the remaining paginated pages too
+  (archived/local captures stay single-page, since a Wayback snapshot rarely includes
+  every page).
+- **Banner-to-first-post cover for forum sources.** The page is captured from the top
+  (banner) down to the bottom of the first post and used as the post's cover image,
+  doubling as citation evidence (described in the citation `note`). The Wayback `if_`
+  raw capture keeps the archive toolbar out of frame. Best-effort (needs playwright).
+
 ### Fixed
 - Windows-1252 punctuation (curly quotes, dashes, ellipsis) on pages served as
   `text/html` with no charset is no longer mis-decoded into C1 control characters.
@@ -13,6 +77,7 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `U+0092` — invisible mojibake that also made YAML front matter unparseable
   (`control characters are not allowed`). `fix_cp1252_controls()` remaps the
   `0x80–0x9F` range before parsing; it's a no-op on correctly-decoded UTF-8.
+
 ## [0.3.0] - 2026-06-20
 
 ### Changed
