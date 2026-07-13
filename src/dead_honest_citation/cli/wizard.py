@@ -16,6 +16,7 @@ from typing import Any
 from .. import config, staging
 from ..adapters import PLATFORM_ALIASES
 from ..core.pipeline import process_url
+from ..ui import detail, error, status, success, warn
 from .stage import run_menu
 
 
@@ -65,54 +66,54 @@ def discard(path: str) -> None:
 
 def wizard() -> None:
     """Guided interactive flow: pick source → convert → review each → stage/promote."""
-    print("=== DeadHonestCitation · guided converter ===\n")
+    status("=== DeadHonestCitation · guided converter ===\n")
     sources = resolve_sources(ask("Source (a .txt list, a folder of .html, or one URL/path): "))
     if not sources:
-        print("No sources found.")
+        warn("No sources found.")
         return
 
     plat_in = ask("Platform [auto / ghost / wordpress / html] (default auto): ", "auto").lower()
     platform = None if plat_in in ("", "auto") else PLATFORM_ALIASES.get(plat_in, plat_in)
 
     before = set(glob.glob(os.path.join(config.POSTS_DIR, "*.md")))
-    print(f"\nConverting {len(sources)} source(s)…\n")
+    status(f"\nConverting {len(sources)} source(s)…\n")
     for src in sources:
         process_url(src, platform)
     new = sorted(set(glob.glob(os.path.join(config.POSTS_DIR, "*.md"))) - before)
 
     if not new:
-        print("\nNo new posts were produced (already converted, or nothing meaningful).")
+        warn("\nNo new posts were produced (already converted, or nothing meaningful).")
         return
 
     repo = ask(f"\nJekyll repo [{config.DEFAULT_REPO}]: ", config.DEFAULT_REPO)
     tag = ask(f"Source tag to add [{config.DEFAULT_TAG}] (blank for none): ", config.DEFAULT_TAG)
 
-    print(f"\n{len(new)} new post(s) to review:\n")
+    status(f"\n{len(new)} new post(s) to review:\n")
     staged = 0
     for path in new:
         s = post_summary(path)
-        print(f"— {s['title']}")
-        print(f"   {s['date']} · {s['words']} words · {s['links']} links · {s['images']} image(s)")
+        status(f"— {s['title']}")
+        detail(f"   {s['date']} · {s['words']} words · {s['links']} links · {s['images']} image(s)")
         choice = ask(
             "   [d]raft · [p]ost · [s]kip(delete) · [l]eave in output  (default d): ", "d"
         ).lower()
         if choice.startswith("s"):
             discard(path)
-            print("   ✗ skipped (deleted)\n")
+            error("   ✗ skipped (deleted)\n")
             continue
         if choice.startswith("l"):
-            print("   · left in output/\n")
+            detail("   · left in output/\n")
             continue
         dest, n = staging.stage_one(
             path, repo, tag=tag, to_posts=choice.startswith("p"), force=False
         )
         if dest is None:
-            print("   ↷ already staged, skipped\n")
+            detail("   ↷ already staged, skipped\n")
         else:
-            print(f"   ✓ {os.path.relpath(dest, repo)}  (+{n} asset(s))\n")
+            success(f"   ✓ {os.path.relpath(dest, repo)}  (+{n} asset(s))\n")
             staged += 1
 
-    print(f"Staged {staged} post(s).")
+    status(f"Staged {staged} post(s).")
     if ask("\nOpen the promote menu (drafts → _posts) now? [y/N]: ", "n").lower().startswith("y"):
         run_menu(repo)
-    print("\nDone.")
+    status("\nDone.")

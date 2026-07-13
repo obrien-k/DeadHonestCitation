@@ -1,12 +1,17 @@
-"""dhc discover — find Wayback captures without knowing the URLs up front."""
+"""dhc discover — find Wayback captures without knowing the URLs up front.
 
-import sys
+Status goes to the stderr console; the discovered URLs/hosts go to stdout via a
+plain `print` on purpose — that stream is machine-readable and gets piped into
+`dhc convert`, so it must stay free of styling and Rich's width-based wrapping.
+"""
+
 from typing import Annotated
 
 import requests
 import typer
 
 from ..network import wayback
+from ..ui import detail, error, status, success, warn
 
 discover_app = typer.Typer(no_args_is_help=True)
 
@@ -24,7 +29,7 @@ def domain(
             help="Keep only URLs whose slug contains this substring (case-insensitive).",
         ),
     ] = None,
-    status: Annotated[
+    status_filter: Annotated[
         str, typer.Option("--status", help='HTTP status to keep (default "200"; "" for any).')
     ] = "200",
     any_type: Annotated[
@@ -52,18 +57,18 @@ def domain(
         rows = wayback.discover(
             domain,
             contains=contains,
-            status=status or None,
+            status=status_filter or None,
             mimetype=None if any_type else "text/html",
             newest=newest,
         )
     except requests.RequestException as e:
-        print(f"✗ CDX query failed: {e}", file=sys.stderr)
+        error(f"✗ CDX query failed: {e}", err=True)
         raise typer.Exit(1) from e
 
     urls = [wayback.wayback_url(ts, orig) for ts, orig in rows]
 
     note = f" containing '{contains}'" if contains else ""
-    print(f"Found {len(urls)} archived URL(s) for {domain}{note}.", file=sys.stderr)
+    status(f"Found {len(urls)} archived URL(s) for {domain}{note}.", err=True)
 
     if not urls:
         raise typer.Exit(0)
@@ -71,7 +76,7 @@ def domain(
     if output:
         with open(output, "w", encoding="utf-8") as f:
             f.write("\n".join(urls) + "\n")
-        print(f"→ wrote {len(urls)} URL(s) to {output}", file=sys.stderr)
+        status(f"→ wrote {len(urls)} URL(s) to {output}", err=True)
     else:
         print("\n".join(urls))
 
@@ -89,19 +94,19 @@ def recover(
     domains = list(on) if on else wayback.COMMON_HOSTS
     hits = wayback.recover(name, domains)
     if not hits:
-        print(
+        warn(
             f"No archived or live host found for '{name}' on: {', '.join(domains)}",
-            file=sys.stderr,
+            err=True,
         )
         raise typer.Exit(0)
-    print(f"Candidate host(s) for '{name}':", file=sys.stderr)
+    status(f"Candidate host(s) for '{name}':", err=True)
     for host, latest, live in hits:
         tags = []
         if latest:
             tags.append(f"archived (latest {latest[:8]})")
         if live:
             tags.append("live")
-        print(f"  {host}  —  {', '.join(tags)}", file=sys.stderr)
+        detail(f"  {host}  —  {', '.join(tags)}", err=True)
         # Pipeable next step: enumerate the archive if archived, else the live URL.
         print(host if latest else f"https://{host}/")
 
@@ -115,10 +120,10 @@ def save(
     try:
         archived = wayback.save_page_now(url)
     except requests.RequestException as e:
-        print(f"✗ Save Page Now failed: {e}", file=sys.stderr)
+        error(f"✗ Save Page Now failed: {e}", err=True)
         raise typer.Exit(1) from e
     if not archived:
-        print("✗ Save Page Now did not return a snapshot URL.", file=sys.stderr)
+        error("✗ Save Page Now did not return a snapshot URL.", err=True)
         raise typer.Exit(1)
-    print(f"✓ Saved → {archived}", file=sys.stderr)
+    success(f"✓ Saved → {archived}", err=True)
     print(archived)

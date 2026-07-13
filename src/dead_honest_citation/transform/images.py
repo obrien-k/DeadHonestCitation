@@ -10,6 +10,7 @@ from bs4 import Tag
 from ..config import OUTPUT_DIR
 from ..network.polite import polite_get
 from ..network.wayback import wayback_image_candidates
+from ..ui import warn
 
 if TYPE_CHECKING:
     from ..targets import OutputTarget
@@ -29,7 +30,7 @@ def download_image(url: str, post_img_dir: str) -> str | None:
             f.write(response.content)
         return local_path
     except Exception as e:
-        print(f"  ⚠ Image download failed ({url}): {e}")
+        warn(f"  ⚠ Image download failed ({url}): {e}")
         return None
 
 
@@ -108,7 +109,7 @@ def download_images(
             and base_dir
             and not src.startswith(("http://", "https://", "//", "/web/"))
         ):
-            print(f"  ⚠ Image unrecoverable, dropping: {os.path.basename(src)}")
+            warn(f"  ⚠ Image unrecoverable, dropping: {os.path.basename(src)}")
             img.decompose()
 
     return soup
@@ -173,7 +174,7 @@ def copy_local_image(src: str, base_dir: str, post_img_dir: str) -> str | None:
         shutil.copyfile(candidate, dest)
         return dest
     except OSError as e:
-        print(f"  ⚠ Local image copy failed ({candidate}): {e}")
+        warn(f"  ⚠ Local image copy failed ({candidate}): {e}")
         return None
 
 

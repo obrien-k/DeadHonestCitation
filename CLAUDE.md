@@ -107,9 +107,22 @@ Package layout (each module's role):
   (passthrough lifting), `encoding` (cp1252 C1 repair).
 - `targets/` — the target registry and `resolve_target()`; writing dispatches through
   each target's `write()`; `targets/data.py` holds `derive_citation()` + the cite include.
-- `network/polite.py` — the shared rate-limited HTTP layer (`polite_get()`: global minimum
-  interval, Retry-After on 429/503, exponential backoff; tunable via `DHC_MIN_INTERVAL`/
-  `DHC_MAX_RETRIES`). Module-global throttle state on purpose: one clock per process.
+- `network/polite.py` — the shared rate-limited HTTP layer. The policy lives on a
+  `PoliteSession` (global minimum interval, explicit per-request timeouts, Retry-After
+  on 429/503, exponential backoff; tunable via `DHC_MIN_INTERVAL`/`DHC_MAX_RETRIES`);
+  one module-level instance (`_session`) is shared process-wide so the throttle clock
+  survives across callers, and `polite_get()` is a thin wrapper delegating to it (public
+  API unchanged). Exhausted 429/503 retries raise `WaybackRateLimitError`.
+- `exceptions.py` — the `DHCError` hierarchy (`FetchError`, `WaybackRateLimitError` —
+  also a `requests.RequestException` so discovery keeps catching it —,
+  `PlatformDetectError`, `ContentNotFoundError`, `EmitError`). Raised at the pipeline/
+  network failure sites and caught at the `process_url`/`process_markdown` boundary,
+  which maps each to an `Outcome` so a batch never dies on one source.
+- `ui.py` — the Rich `Console` singleton (stdout) + a stderr console + `logging` setup
+  (`setup_logging()` behind the root `-v/--verbose` flag). Status glyphs (→ ✓ ✗ ⚠ ↷ ·)
+  are color-coded via `status`/`detail`/`success`/`warn`/`error` helpers; `cli/convert.py`
+  wraps the source loop in a `rich.progress` bar that shares this console (disabled on
+  non-TTY, so piped/captured output stays clean).
 - `network/wayback.py` — Wayback URL math (`WAYBACK_RE`, `unwrap_wayback()`,
   `wayback_image_candidates()`, `wayback_raw()`) and discovery (CDX enumerate,
   host recovery, Save Page Now).

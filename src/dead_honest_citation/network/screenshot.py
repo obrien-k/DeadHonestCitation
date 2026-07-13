@@ -1,5 +1,7 @@
 """Page-to-PNG rendering for citation evidence (lazy, optional playwright)."""
 
+from ..ui import warn
+
 
 def screenshot_page(
     url: str, out_path: str, end_selector: str | None = None, timeout: float = 30000
@@ -24,7 +26,7 @@ def screenshot_page(
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print(
+        warn(
             "  ⚠ screenshots need playwright: pip install playwright && playwright install chromium"
         )
         return False
@@ -46,7 +48,7 @@ def screenshot_page(
                         "height": box["y"] + box["height"],
                     }
                 else:
-                    print("  ⚠ screenshot: first-post element not found, using full page")
+                    warn("  ⚠ screenshot: first-post element not found, using full page")
             if clip:
                 page.screenshot(path=out_path, clip=clip)
             else:
@@ -54,5 +56,5 @@ def screenshot_page(
             browser.close()
         return True
     except Exception as e:
-        print(f"  ⚠ screenshot failed: {e}")
+        warn(f"  ⚠ screenshot failed: {e}")
         return False

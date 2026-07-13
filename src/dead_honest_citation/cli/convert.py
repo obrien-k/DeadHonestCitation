@@ -1,8 +1,16 @@
 """dhc convert / clean / prune — the conversion pipeline and output housekeeping."""
 
+import os
 from typing import Annotated
 
 import typer
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from ..adapters import PLATFORM_ALIASES, PLATFORMS
 from ..config import RUNLOG
@@ -12,6 +20,7 @@ from ..core.runlog import log_run
 from ..core.sources import collect_sources, is_markdown_source
 from ..models import Outcome
 from ..targets import TARGET_ALIASES, TARGETS
+from ..ui import console, detail, status, warn
 
 _PLATFORM_CHOICES = sorted(set(PLATFORMS) | set(PLATFORM_ALIASES))
 _TARGET_CHOICES = sorted(set(TARGETS) | set(TARGET_ALIASES))
@@ -116,25 +125,43 @@ def convert(
 
     source_list = collect_sources(sources or ["urls.txt"], recursive=recursive, txt_as_content=txt)
     if not source_list:
-        print("No sources to process.")
+        warn("No sources to process.")
         raise typer.Exit(0)
 
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
-    print(f"Processing {len(source_list)} source(s), {mode}, → {resolved_target}…")
+    status(f"Processing {len(source_list)} source(s), {mode}, → {resolved_target}…")
     tally: dict[str, int] = {}
-    for src in source_list:
-        if is_markdown_source(src, txt):
-            result: Outcome = process_markdown(src, resolved_target)
-        else:
-            result = process_url(
-                src, platform, resolved_target, screenshot=screenshot, full_thread=full_thread
+    # The progress bar shares the ui console, so per-source log lines from the
+    # pipeline render above the live bar. Disabled on non-TTY (piped/captured)
+    # output so only the log lines remain — no half-rendered bar frames.
+    progress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+        disable=not console.is_terminal,
+    )
+    with progress:
+        task = progress.add_task("Converting", total=len(source_list))
+        for src in source_list:
+            progress.update(
+                task, description=f"Converting {os.path.basename(src.rstrip('/')) or src}"
             )
-        log_run(src, result, resolved_target)
-        tally[result.status] = tally.get(result.status, 0) + 1
+            if is_markdown_source(src, txt):
+                result: Outcome = process_markdown(src, resolved_target)
+            else:
+                result = process_url(
+                    src, platform, resolved_target, screenshot=screenshot, full_thread=full_thread
+                )
+            log_run(src, result, resolved_target)
+            tally[result.status] = tally.get(result.status, 0) + 1
+            progress.advance(task)
 
-    summary = ", ".join(f"{n} {status}" for status, n in sorted(tally.items()))
-    print(f"\nDone — {summary or 'nothing processed'}.")
-    print(f"Run log: {RUNLOG}")
+    summary = ", ".join(f"{n} {name}" for name, n in sorted(tally.items()))
+    status(f"\nDone — {summary or 'nothing processed'}.")
+    detail(f"Run log: {RUNLOG}")
 
 
 def clean(

@@ -6,7 +6,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Rich UX + resilience.** The package now speaks through a single Rich console
+  (`ui.py`): the semantic status glyphs (→ ✓ ✗ ⚠ ↷ ·) are color-coded, and
+  `dhc convert` wraps its source loop in a `rich.progress` bar that shares that
+  console so per-source lines interleave above it. The bar disables itself on
+  non-TTY output, so piped/captured runs stay clean and file outputs are
+  unchanged. A root `-v/--verbose` flag enables `logging` (RichHandler on stderr)
+  with per-request HTTP tracing.
+- **Exception hierarchy (`exceptions.py`).** `DHCError` base with `FetchError`,
+  `WaybackRateLimitError` (carries the last `Retry-After`; also a
+  `requests.RequestException` so discovery keeps catching it),
+  `PlatformDetectError`, `ContentNotFoundError`, and `EmitError`. These are
+  raised at the network/pipeline failure sites and caught at the
+  `process_url`/`process_markdown` boundary, which maps each to an `Outcome` — so
+  a batch never dies on one bad source and `runlog.jsonl` gets an actionable
+  reason. Exhausted 429/503 retries now raise `WaybackRateLimitError`.
+
 ### Changed
+- **`network/polite.py` is now a `PoliteSession`.** The module globals became a
+  class holding the throttle clock and retry policy, with an explicit timeout on
+  every request; one shared module-level instance keeps the process-wide clock,
+  and `polite_get()` stays a thin wrapper (public API and `DHC_MIN_INTERVAL`/
+  `DHC_MAX_RETRIES` tunables unchanged).
 - **Restructured into a `src/` package behind one CLI.** The flat scripts became
   `src/dead_honest_citation/` — `core/` (pipeline, input layer, capture tier,
   run-log, housekeeping), `adapters/` (one module per platform), `transform/`

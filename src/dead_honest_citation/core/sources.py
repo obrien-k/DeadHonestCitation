@@ -9,6 +9,7 @@ from collections.abc import Iterable
 
 from ..adapters.docx import docx_to_html
 from ..network.polite import polite_get
+from ..ui import warn
 
 # Local file extensions the pipeline can read directly (a saved page or a Word doc).
 SOURCE_EXTS = (".html", ".htm", ".docx")
@@ -106,7 +107,7 @@ def collect_sources(
         if os.path.isdir(expanded):
             hits = _dir_sources(expanded, recursive, content_exts)
             if not hits:
-                print(f"  ⚠ no source files in directory: {token}")
+                warn(f"  ⚠ no source files in directory: {token}")
             sources.extend(hits)
         elif token.startswith(("http://", "https://")):
             sources.append(token)
@@ -115,14 +116,14 @@ def collect_sources(
             if os.path.isfile(expanded):
                 sources.append(expanded)
             else:
-                print(f"  ⚠ source not found, skipping: {token}")
+                warn(f"  ⚠ source not found, skipping: {token}")
         elif os.path.isfile(expanded):
             with open(expanded, encoding="utf-8", errors="replace") as f:
                 sources.extend(
                     ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")
                 )
         else:
-            print(f"  ⚠ source not found, skipping: {token}")
+            warn(f"  ⚠ source not found, skipping: {token}")
     # De-duplicate while preserving first-seen order.
     seen, unique = set(), []
     for s in sources:

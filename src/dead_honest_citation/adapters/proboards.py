@@ -24,6 +24,7 @@ from ..models import PostMetadata
 from ..network.polite import polite_get
 from ..network.wayback import WAYBACK_RE
 from ..transform.encoding import fix_cp1252_controls
+from ..ui import warn
 from .base import PlatformAdapter, Selector, as_tag, attr_str
 
 PB_DATE_RE = re.compile(r"on ([A-Z][a-z]{2} \d{1,2}, \d{4}, \d{1,2}:\d{2}[ap]m)")
@@ -203,7 +204,7 @@ def proboards_collect(root: Tag, url: str, base_dir: str | None, full_thread: bo
             try:
                 html = fix_cp1252_controls(polite_get(page_url).text)
             except Exception as e:
-                print(f"  ⚠ full-thread: could not fetch {page_url}: {e}")
+                warn(f"  ⚠ full-thread: could not fetch {page_url}: {e}")
                 break
             posts.extend(_proboards_posts(BeautifulSoup(html, "html.parser")))
     return posts

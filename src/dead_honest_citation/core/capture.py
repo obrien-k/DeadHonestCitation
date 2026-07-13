@@ -15,6 +15,7 @@ from ..config import OUTPUT_DIR
 from ..models import Outcome, PostMetadata
 from ..network.wayback import unwrap_wayback
 from ..targets import OutputTarget
+from ..ui import detail, success
 
 MARKUP_TYPES = ("text/html", "application/xhtml", "application/xml", "text/xml")
 
@@ -65,8 +66,8 @@ def capture_binary(
     meta = PostMetadata(title=name, description=f"Captured {kind}: {name}")
     doc_relpath = tgt.doc_relpath(slug, None)
     if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
-        print(f"  ↷ Already exists, skipping: {doc_relpath}")
+        detail(f"  ↷ Already exists, skipping: {doc_relpath}")
         return Outcome("skipped", doc_relpath, reason="exists")
     written = tgt.write(doc_relpath, url, None, "capture", slug, meta, body, "", kind=kind)
-    print(f"  ✓ Captured ({kind}): {written}")
+    success(f"  ✓ Captured ({kind}): {written}")
     return Outcome("captured", written, reason=kind)

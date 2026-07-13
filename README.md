@@ -51,10 +51,12 @@ src/dead_honest_citation/
   transform/      # HTML→MD machinery: cleanup, images, embeds, footnotes,
                   # front-matter lifting, cp1252 repair
   targets/        # the TARGETS registry: jekyll, commonmark, data (citations)
-  network/        # polite.py (rate-limited HTTP) · wayback.py (CDX, SPN, URL math) ·
-                  # screenshot.py (optional playwright)
+  network/        # polite.py (PoliteSession: rate-limited HTTP) · wayback.py
+                  # (CDX, SPN, URL math) · screenshot.py (optional playwright)
+  exceptions.py   # the DHCError hierarchy raised at failure sites
+  ui.py           # Rich console singleton + logging (the -v/--verbose flag)
   staging.py      # stage/promote into a Jekyll repo
-  cli/            # the Typer app behind `dhc`
+  cli/            # the Typer app behind `dhc` (per-source progress bar)
 ```
 
 The converter is built around a **platform adapter registry** (`adapters.PLATFORMS`) of `PlatformAdapter` subclasses (the ABC lives in `adapters/base.py`; output targets have a symmetric `OutputTarget` ABC in `targets/base.py`). Each adapter supplies four pieces, so supporting a new CMS/theme/format means adding one subclass plus its registry entry — no changes to the processing pipeline:

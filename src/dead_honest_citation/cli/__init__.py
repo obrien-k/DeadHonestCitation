@@ -1,7 +1,10 @@
 """The unified `dhc` command-line interface."""
 
+from typing import Annotated
+
 import typer
 
+from ..ui import setup_logging
 from .convert import clean, convert, prune
 from .discover import discover_app
 from .stage import menu, promote, stage
@@ -13,6 +16,18 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+
+@app.callback()
+def _root(
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Verbose logging (per-request HTTP tracing)."),
+    ] = False,
+) -> None:
+    """Configure logging before any subcommand runs."""
+    setup_logging(verbose)
+
 
 app.command()(convert)
 app.add_typer(

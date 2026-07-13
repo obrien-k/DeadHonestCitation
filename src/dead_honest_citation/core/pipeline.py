@@ -2,12 +2,18 @@
 The per-source conversion pipeline: load → detect platform → extract metadata →
 locate/clean the body → localize images → embeds/footnotes → Markdown → emit via
 the active output target. Plus the Markdown/plain-text passthrough lane.
+
+`process_url` / `process_markdown` are the orchestration boundary: the inner
+`_convert_*` helpers raise the package exceptions at their failure sites, and the
+boundary turns each into an `Outcome` so a batch never dies on one source and the
+run log gets an actionable reason.
 """
 
 import datetime as dt
 import os
 import re
 
+import requests
 from bs4 import BeautifulSoup, Tag
 from markdownify import markdownify as md
 from slugify import slugify
@@ -15,6 +21,7 @@ from slugify import slugify
 from ..adapters import PLATFORMS, detect_platform
 from ..adapters.proboards import proboards_collect, proboards_render
 from ..config import OUTPUT_DIR
+from ..exceptions import ContentNotFoundError, DHCError, EmitError, FetchError, PlatformDetectError
 from ..models import Outcome, PostMetadata
 from ..network.polite import polite_get
 from ..network.screenshot import screenshot_page
@@ -26,6 +33,7 @@ from ..transform.encoding import fix_cp1252_controls
 from ..transform.footnotes import convert_footnotes
 from ..transform.frontmatter import first_markdown_heading, parse_simple_front_matter
 from ..transform.images import download_cover, download_images
+from ..ui import detail, error, status, success, warn
 from .capture import capture_binary, is_markup
 from .sources import is_local_source, load_source
 
@@ -39,7 +47,10 @@ def process_url(
 ) -> Outcome:
     """Convert one source — a Wayback/live URL or a local HTML file.
 
-    Non-HTML URLs are captured verbatim instead of converted.
+    Non-HTML URLs are captured verbatim instead of converted. The orchestration
+    boundary: catches the package exceptions the inner conversion raises and maps
+    them to a terminal Outcome so callers (the batch loop, the wizard) never see
+    an exception escape.
 
     Args:
         url: A Wayback/live URL or a local .html/.htm/.docx path.
@@ -52,21 +63,45 @@ def process_url(
     Returns:
         The source's terminal Outcome (converted / captured / skipped / failed).
     """
+    status(f"\n→ {url}")
+    try:
+        return _convert_url(url, platform, target, screenshot, full_thread)
+    except FetchError as e:
+        error(f"  ✗ Failed to load: {e}")
+        return Outcome("failed", reason=f"load: {e}")
+    except PlatformDetectError as e:
+        error(f"  ✗ {e}; skipping.")
+        return Outcome("failed", reason="platform not detected")
+    except ContentNotFoundError as e:
+        error(f"  ✗ {e} — skipping.")
+        return Outcome("skipped", reason="no article content")
+    except EmitError as e:
+        error(f"  ✗ Failed to write: {e}")
+        return Outcome("failed", reason=f"emit: {e}")
+
+
+def _convert_url(
+    url: str,
+    platform: str | None,
+    target: str | None,
+    screenshot: bool,
+    full_thread: bool,
+) -> Outcome:
+    """The conversion body. Raises DHCError subclasses at failure sites."""
     tgt = resolve_target(target)
-    print(f"\n→ {url}")
     base_dir: str | None
     if is_local_source(url):
         try:
             html, base_dir = load_source(url)
         except Exception as e:
-            print(f"  ✗ Failed to load: {e}")
-            return Outcome("failed", reason=f"load: {e}")
+            raise FetchError(str(e)) from e
     else:
         try:
             resp = polite_get(url)
-        except Exception as e:
-            print(f"  ✗ Failed to load: {e}")
-            return Outcome("failed", reason=f"load: {e}")
+        except FetchError:
+            raise  # already typed (e.g. WaybackRateLimitError) — keep it
+        except requests.RequestException as e:
+            raise FetchError(str(e)) from e
         base_dir = None
         content_type = resp.headers.get("Content-Type", "")
         if not is_markup(content_type):
@@ -79,10 +114,9 @@ def process_url(
 
     resolved = platform or detect_platform(soup)
     if resolved is None:
-        print("  ✗ Could not detect platform — re-run with --platform; skipping.")
-        return Outcome("failed", reason="platform not detected")
+        raise PlatformDetectError("Could not detect platform — re-run with --platform")
     if not platform:
-        print(f"  · detected platform: {resolved}")
+        detail(f"  · detected platform: {resolved}")
     adapter = PLATFORMS[resolved]
 
     # Extract metadata before unwrapping so cover img src retains its Wayback timestamp
@@ -108,8 +142,7 @@ def process_url(
         fallback = soup.find("article") or soup.find("main")
         article = fallback if isinstance(fallback, Tag) else None
     if article is None:
-        print("  ✗ No article content found — skipping.")
-        return Outcome("skipped", reason="no article content")
+        raise ContentNotFoundError("No article content found")
 
     # Forum sources use the original-post model: keep the OP only unless --full-thread,
     # which also crawls a live thread's later pages (proboards_collect needs the URL, so
@@ -138,7 +171,7 @@ def process_url(
     filepath = os.path.join(OUTPUT_DIR, doc_relpath)
 
     if os.path.exists(filepath):
-        print(f"  ↷ Already exists, skipping: {doc_relpath}")
+        detail(f"  ↷ Already exists, skipping: {doc_relpath}")
         return Outcome("skipped", doc_relpath, reason="exists")
 
     article = download_images(article, slug, base_dir, tgt)
@@ -151,7 +184,7 @@ def process_url(
     # rather than write an empty file. Embed-only posts still pass: convert_embeds()
     # leaves a Markdown link in the body.
     if not markdown.strip():
-        print("  ✗ No meaningful content — skipping.")
+        error("  ✗ No meaningful content — skipping.")
         return Outcome("skipped", reason="empty body")
 
     # A forum source gets a banner→first-post capture: the visual context of the original
@@ -178,10 +211,17 @@ def process_url(
         if screenshot_page(url, os.path.join(shot_dir, shot_name)):
             meta.screenshot = tgt.asset_url(slug, shot_name)
 
-    written = tgt.write(doc_relpath, url, base_dir, resolved, slug, meta, markdown, md_footnotes)
-    print(f"  ✓ Saved: {written}")
+    try:
+        written = tgt.write(
+            doc_relpath, url, base_dir, resolved, slug, meta, markdown, md_footnotes
+        )
+    except DHCError:
+        raise
+    except Exception as e:
+        raise EmitError(str(e)) from e
+    success(f"  ✓ Saved: {written}")
     for note in embed_notes:
-        print(f"  ⚠ NEEDS REVIEW: {note}")
+        warn(f"  ⚠ NEEDS REVIEW: {note}")
     return Outcome("converted", written, reason="; ".join(embed_notes) or None)
 
 
@@ -198,19 +238,30 @@ def process_markdown(path: str, target: str | None = None) -> Outcome:
     Returns:
         The source's terminal Outcome.
     """
+    status(f"\n→ {path}")
+    try:
+        return _convert_markdown(path, target)
+    except FetchError as e:
+        error(f"  ✗ Failed to load: {e}")
+        return Outcome("failed", reason=f"load: {e}")
+    except EmitError as e:
+        error(f"  ✗ Failed to write: {e}")
+        return Outcome("failed", reason=f"emit: {e}")
+
+
+def _convert_markdown(path: str, target: str | None) -> Outcome:
+    """The Markdown passthrough body. Raises DHCError subclasses at failure sites."""
     tgt = resolve_target(target)
-    print(f"\n→ {path}")
     expanded = os.path.expanduser(path)
     try:
         with open(expanded, encoding="utf-8", errors="replace") as f:
             text = f.read()
     except OSError as e:
-        print(f"  ✗ Failed to load: {e}")
-        return Outcome("failed", reason=f"load: {e}")
+        raise FetchError(str(e)) from e
     meta_in, body = parse_simple_front_matter(text)
     body = body.strip("\n")
     if not body.strip():
-        print("  ✗ Empty file — skipping.")
+        error("  ✗ Empty file — skipping.")
         return Outcome("skipped", reason="empty file")
     stem = os.path.splitext(os.path.basename(expanded))[0]
     title = (
@@ -234,10 +285,15 @@ def process_markdown(path: str, target: str | None = None) -> Outcome:
     )
     doc_relpath = tgt.doc_relpath(slug, meta.date)
     if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
-        print(f"  ↷ Already exists, skipping: {doc_relpath}")
+        detail(f"  ↷ Already exists, skipping: {doc_relpath}")
         return Outcome("skipped", doc_relpath, reason="exists")
-    written = tgt.write(
-        doc_relpath, path, os.path.dirname(expanded), "txt", slug, meta, body + "\n", ""
-    )
-    print(f"  ✓ Saved: {written}")
+    try:
+        written = tgt.write(
+            doc_relpath, path, os.path.dirname(expanded), "txt", slug, meta, body + "\n", ""
+        )
+    except DHCError:
+        raise
+    except Exception as e:
+        raise EmitError(str(e)) from e
+    success(f"  ✓ Saved: {written}")
     return Outcome("converted", written)

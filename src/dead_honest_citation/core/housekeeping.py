@@ -6,6 +6,7 @@ import re
 import shutil
 
 from ..config import ASSETS_DIR, POSTS_DIR
+from ..ui import detail, status, success, warn
 
 
 def post_slug(path: str) -> str:
@@ -19,22 +20,22 @@ def clean_output(assume_yes: bool = False) -> None:
     posts = sorted(glob.glob(os.path.join(POSTS_DIR, "*.md")))
     assets = [d for d in glob.glob(os.path.join(ASSETS_DIR, "*")) if os.path.isdir(d)]
     if not posts and not assets:
-        print("output/ is already clean.")
+        status("output/ is already clean.")
         return
-    print(f"This deletes {len(posts)} post(s) and {len(assets)} asset folder(s) under output/.")
+    status(f"This deletes {len(posts)} post(s) and {len(assets)} asset folder(s) under output/.")
     if not assume_yes:
         try:
             if input("Proceed? [y/N] ").strip().lower() not in ("y", "yes"):
-                print("Aborted.")
+                warn("Aborted.")
                 return
         except EOFError:
-            print("Aborted.")
+            warn("Aborted.")
             return
     for p in posts:
         os.remove(p)
     for d in assets:
         shutil.rmtree(d, ignore_errors=True)
-    print(f"✓ Cleaned output/ ({len(posts)} post(s), {len(assets)} asset folder(s)).")
+    success(f"✓ Cleaned output/ ({len(posts)} post(s), {len(assets)} asset folder(s)).")
 
 
 def prune_output() -> None:
@@ -49,13 +50,13 @@ def prune_output() -> None:
         if len(files) > 1:
             files.sort(key=os.path.getmtime, reverse=True)  # newest first
             for old in files[1:]:
-                print(f"  ↺ older duplicate of '{slug}', removing: {os.path.basename(old)}")
+                detail(f"  ↺ older duplicate of '{slug}', removing: {os.path.basename(old)}")
                 os.remove(old)
                 removed += 1
     live = set(by_slug)
     for d in glob.glob(os.path.join(ASSETS_DIR, "*")):
         if os.path.isdir(d) and os.path.basename(d) not in live:
-            print(f"  ↺ orphaned assets (no post), removing: {os.path.basename(d)}/")
+            detail(f"  ↺ orphaned assets (no post), removing: {os.path.basename(d)}/")
             shutil.rmtree(d, ignore_errors=True)
             removed += 1
-    print(f"✓ Prune complete — {removed} item(s) removed." if removed else "✓ Nothing to prune.")
+    success(f"✓ Prune complete — {removed} item(s) removed." if removed else "✓ Nothing to prune.")
