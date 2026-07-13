@@ -68,11 +68,15 @@ dhc prune          # drop stale output (older slug dupes, orphaned asset folders
 ruff check .
 ruff format .
 mypy          # strict; covers src/
+
+# Tests — offline, mocked HTTP (responses), no network; runs in well under a second
+pytest
 ```
 
 The old script entry points (`python index.py`, `discover.py`, `to_jekyll.py`, `wizard.py`)
-are deprecated shims that translate their flags and delegate to `dhc`. There are no
-automated tests yet; `tests/fixtures/` holds offline sample pages per platform.
+are deprecated shims that translate their flags and delegate to `dhc`. `tests/fixtures/`
+holds offline sample pages per platform, used by both the pytest suite (`tests/`) and
+manual smoke-testing (the byte-diff harness in the project's verification notes).
 
 ## Architecture
 

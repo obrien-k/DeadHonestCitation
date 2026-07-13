@@ -263,9 +263,11 @@ pip install -e ".[dev]"
 ruff check .       # lint
 ruff format .      # format
 mypy               # strict type-check (src/)
+pytest             # offline, mocked HTTP (`responses`); runs in well under a second
 ```
 
-Configuration lives in `pyproject.toml`. There are no automated tests yet (a pytest suite is planned; `tests/fixtures/` holds the offline sample pages).
+Configuration lives in `pyproject.toml`. `tests/fixtures/` holds the offline sample
+pages per platform that both the pytest suite and manual smoke-testing use.
 
 ## Notes
 

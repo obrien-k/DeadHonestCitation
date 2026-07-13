@@ -7,6 +7,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A pytest suite** (`tests/`) covering the adapter registry (detection +
+  metadata/body extraction per platform), `collect_sources()`, both document
+  targets' front matter + `doc_relpath()`, the `data` target's `emit_citation`,
+  `derive_citation()`'s provenance rules, Wayback URL math + CDX/Save-Page-Now
+  discovery, the `PoliteSession` retry/backoff policy, and an end-to-end offline
+  conversion of the Ghost and Markdown fixtures through both document targets.
+  Entirely offline — HTTP is mocked with `responses`, the shared `PoliteSession`
+  throttle is neutralized for test speed — and runs in well under a second.
 - **Rich UX + resilience.** The package now speaks through a single Rich console
   (`ui.py`): the semantic status glyphs (→ ✓ ✗ ⚠ ↷ ·) are color-coded, and
   `dhc convert` wraps its source loop in a `rich.progress` bar that shares that
