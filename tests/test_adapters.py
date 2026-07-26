@@ -39,7 +39,8 @@ def test_detect_platform_docx(fixture_soup: Callable[[str], BeautifulSoup]) -> N
 
 
 def test_generic_never_auto_detects() -> None:
-    # detect() is always False so --html/--platform generic must be forced.
+    # detect() is always False so generic never shadows a real platform during
+    # auto-detection. The pipeline, not the registry, applies it as the fallback.
     assert (
         GenericAdapter().detect(BeautifulSoup("<article><h1>x</h1></article>", "html.parser"))
         is False

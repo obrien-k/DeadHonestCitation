@@ -72,17 +72,25 @@ def wizard() -> None:
         warn("No sources found.")
         return
 
-    plat_in = ask("Platform [auto / ghost / wordpress / html] (default auto): ", "auto").lower()
+    plat_in = ask(
+        "Platform [auto / ghost / wordpress / proboards / html] (default auto): ", "auto"
+    ).lower()
     platform = None if plat_in in ("", "auto") else PLATFORM_ALIASES.get(plat_in, plat_in)
 
     before = set(glob.glob(os.path.join(config.POSTS_DIR, "*.md")))
     status(f"\nConverting {len(sources)} source(s)…\n")
-    for src in sources:
-        process_url(src, platform)
+    outcomes = [process_url(src, platform) for src in sources]
     new = sorted(set(glob.glob(os.path.join(config.POSTS_DIR, "*.md"))) - before)
 
     if not new:
-        warn("\nNo new posts were produced (already converted, or nothing meaningful).")
+        # Report the per-source outcomes rather than inferring from an unchanged
+        # _posts/: a hard failure, an already-converted source, and an empty body
+        # are three different answers and the user needs to know which one they got.
+        warn("\nNo new posts were produced.")
+        for st in sorted({o.status for o in outcomes}):
+            n = sum(1 for o in outcomes if o.status == st)
+            reasons = sorted({o.reason for o in outcomes if o.status == st and o.reason})
+            detail(f"  {n} {st}" + (f" — {'; '.join(reasons)}" if reasons else ""))
         return
 
     repo = ask(f"\nJekyll repo [{config.DEFAULT_REPO}]: ", config.DEFAULT_REPO)

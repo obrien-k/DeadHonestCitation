@@ -47,8 +47,9 @@ def extract_metadata_generic(soup: BeautifulSoup) -> PostMetadata:
 
 
 class GenericAdapter(PlatformAdapter):
-    """Opt-in only — detect() is always False so it never shadows a real
-    platform during auto-detection; select it with --platform generic / --html."""
+    """Arbitrary HTML. detect() is always False so it never shadows a real platform
+    during auto-detection; the pipeline applies it as the cascade's fallback, and
+    --platform generic / --html selects it outright."""
 
     name: ClassVar[str] = "generic"
     content: ClassVar[Selector | list[Selector]] = [

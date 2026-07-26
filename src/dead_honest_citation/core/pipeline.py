@@ -34,7 +34,7 @@ from ..transform.footnotes import convert_footnotes
 from ..transform.frontmatter import first_markdown_heading, parse_simple_front_matter
 from ..transform.images import download_cover, download_images
 from ..ui import detail, error, status, success, warn
-from .capture import capture_binary, is_markup
+from .capture import capture_binary, capture_page, is_markup
 from .sources import is_local_source, load_source
 
 
@@ -112,11 +112,20 @@ def _convert_url(
     soup = BeautifulSoup(html, "html.parser")
     remove_wayback_toolbar(soup)  # mutates in place
 
-    resolved = platform or detect_platform(soup)
-    if resolved is None:
-        raise PlatformDetectError("Could not detect platform — re-run with --platform")
+    # Platform cascade. detect_platform() stays strict — it answers "which CMS is
+    # this?" and None means none — but an unrecognized page is still a page, so the
+    # pipeline falls through to the generic adapter rather than dead-ending. Only an
+    # explicit --platform pins the choice; auto never refuses to try.
+    if platform is not None and platform not in PLATFORMS:
+        known = ", ".join(PLATFORMS)
+        raise PlatformDetectError(f"Unknown platform {platform!r} — known platforms: {known}")
+    detected = platform or detect_platform(soup)
+    resolved = detected or "generic"
     if not platform:
-        detail(f"  · detected platform: {resolved}")
+        if detected:
+            detail(f"  · detected platform: {resolved}")
+        else:
+            detail("  · no CMS recognized — reading as generic HTML")
     adapter = PLATFORMS[resolved]
 
     # Extract metadata before unwrapping so cover img src retains its Wayback timestamp
@@ -142,6 +151,8 @@ def _convert_url(
         fallback = soup.find("article") or soup.find("main")
         article = fallback if isinstance(fallback, Tag) else None
     if article is None:
+        if platform is None:
+            return capture_page(html, url, tgt, meta)
         raise ContentNotFoundError("No article content found")
 
     # Forum sources use the original-post model: keep the OP only unless --full-thread,
@@ -184,6 +195,8 @@ def _convert_url(
     # rather than write an empty file. Embed-only posts still pass: convert_embeds()
     # leaves a Markdown link in the body.
     if not markdown.strip():
+        if platform is None:
+            return capture_page(html, url, tgt, meta)
         error("  ✗ No meaningful content — skipping.")
         return Outcome("skipped", reason="empty body")
 

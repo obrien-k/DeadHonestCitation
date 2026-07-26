@@ -127,3 +127,97 @@ def test_reconvert_markdown_is_idempotent(tmp_path: Path, monkeypatch: pytest.Mo
     second = process_markdown(str(src_dir / "note.md"), target="jekyll")
     assert second.status == "skipped"
     assert second.reason == "exists"
+
+
+# --- platform cascade: unrecognized pages still convert ----------------------
+
+
+def test_unrecognized_page_falls_back_to_generic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A page no adapter claims is read as generic HTML instead of dead-ending.
+
+    Regression for the wizard dead end: detect_platform() returns None for a
+    hand-written static site, which used to abort the source with "re-run with
+    --platform" — advice the wizard gives no way to follow.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    shutil.copy(FIXTURES_DIR / "no-cms-page.html", src / "no-cms-page.html")
+    monkeypatch.chdir(tmp_path)
+
+    outcome = process_url(str(src / "no-cms-page.html"), target="jekyll")
+
+    assert outcome.status == "converted"
+    body = (tmp_path / "output" / str(outcome.output)).read_text(encoding="utf-8")
+    assert "The archive is only as honest as the thing it captured." in body
+
+
+def test_wayback_head_chrome_never_reaches_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Archive furniture is stripped before the adapters see the page."""
+    src = tmp_path / "src"
+    src.mkdir()
+    shutil.copy(FIXTURES_DIR / "no-cms-page.html", src / "no-cms-page.html")
+    monkeypatch.chdir(tmp_path)
+
+    outcome = process_url(str(src / "no-cms-page.html"), target="jekyll")
+    body = (tmp_path / "output" / str(outcome.output)).read_text(encoding="utf-8")
+
+    assert "web-static.archive.org" not in body
+    assert "__wm." not in body
+    assert "RufflePlayer" not in body
+
+
+def test_bodyless_page_is_captured_not_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Last rung: nothing extractable → preserve the snapshot, never silently skip."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "shell.html").write_text(
+        "<html><head><title>JS Shell</title></head><body></body></html>", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    outcome = process_url(str(src / "shell.html"), target="jekyll")
+
+    assert outcome.status == "captured"
+    assert outcome.reason == "page"
+    snapshot = (
+        tmp_path / "output" / "assets" / "img" / "blog" / "posts" / "js-shell" / "js-shell.html"
+    )
+    assert snapshot.exists()
+
+
+def test_forced_platform_still_fails_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit --platform that finds nothing is a wrong-adapter error, not a capture."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "shell.html").write_text(
+        "<html><head><title>JS Shell</title></head><body></body></html>", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    outcome = process_url(str(src / "shell.html"), platform="wordpress", target="jekyll")
+
+    assert outcome.status == "skipped"
+    assert outcome.reason == "no article content"
+
+
+def test_unknown_forced_platform_is_an_outcome_not_a_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bad --platform value must not escape the orchestration boundary as a KeyError."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "page.html").write_text("<html><body><p>hi</p></body></html>", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    outcome = process_url(str(src / "page.html"), platform="bogus", target="jekyll")
+
+    assert outcome.status == "failed"
+    assert outcome.reason == "platform not detected"

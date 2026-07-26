@@ -35,6 +35,42 @@ def _capture_kind(content_type: str | None) -> str:
     return "file"
 
 
+def capture_page(html: str, url: str, tgt: OutputTarget, meta: PostMetadata) -> Outcome:
+    """Preserve an archived page that resists article extraction.
+
+    The last rung of the platform cascade: no CMS matched and the generic reader
+    found no body worth keeping (a JS-rendered app, a landing page, a directory
+    index). The snapshot is still evidence, so save its markup as an asset and
+    emit a record pointing at it rather than dropping the source. Reached only on
+    an auto-resolved platform — an explicit --platform that finds nothing is a
+    wrong-adapter error and stays loud.
+    """
+    original = unwrap_wayback(url)
+    slug = slugify(meta.title) if meta.title and meta.title != "Untitled" else ""
+    slug = slug or slugify(urlparse(original).netloc) or "capture"
+    name = f"{slug}.html"
+
+    asset_dir = os.path.join(OUTPUT_DIR, tgt.asset_dir(slug))
+    os.makedirs(asset_dir, exist_ok=True)
+    with open(os.path.join(asset_dir, name), "w", encoding="utf-8") as f:
+        f.write(html)
+    asset_url = tgt.asset_url(slug, name)
+
+    if not meta.description:
+        meta.description = f"Archived page preserved verbatim: {original}"
+    body = (
+        "This page had no extractable article body — it is preserved here as the "
+        f"archived snapshot itself.\n\n[Saved snapshot]({asset_url})\n"
+    )
+    doc_relpath = tgt.doc_relpath(slug, meta.date)
+    if os.path.exists(os.path.join(OUTPUT_DIR, doc_relpath)):
+        detail(f"  ↷ Already exists, skipping: {doc_relpath}")
+        return Outcome("skipped", doc_relpath, reason="exists")
+    written = tgt.write(doc_relpath, url, None, "capture", slug, meta, body, "", kind="page")
+    success(f"  ✓ Captured (page): {written}")
+    return Outcome("captured", written, reason="page")
+
+
 def capture_binary(
     content: bytes, content_type: str | None, url: str, tgt: OutputTarget
 ) -> Outcome:
