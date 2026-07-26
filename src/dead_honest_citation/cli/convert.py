@@ -68,6 +68,15 @@ def convert(
         bool,
         typer.Option("--docx", "--word", help="Shorthand for --platform docx (Word .docx files)"),
     ] = False,
+    hackernews: Annotated[
+        bool,
+        typer.Option(
+            "--hacker-news",
+            "--hn",
+            "-hn",
+            help="Shorthand for --platform hackernews (news.ycombinator.com threads)",
+        ),
+    ] = False,
     txt: Annotated[
         bool,
         typer.Option(
@@ -93,6 +102,16 @@ def convert(
             "(--target data; needs playwright).",
         ),
     ] = False,
+    note: Annotated[
+        str | None,
+        typer.Option(
+            "--note",
+            "-n",
+            help="Editorial note recorded on each citation (--target data), rendered "
+            "under the provenance line. Use it to say what the archive can't, e.g. "
+            "what became of the source since capture.",
+        ),
+    ] = None,
     full_thread: Annotated[
         bool,
         typer.Option(
@@ -105,7 +124,13 @@ def convert(
     """Convert archived/live web pages, saved HTML, Word docs, or loose Markdown
     into Markdown posts or provenance-stamped citation objects."""
     # Shorthand flags are sugar for --platform; an explicit --platform wins.
-    shorthands = ((ghost, "ghost"), (wordpress, "wordpress"), (generic, "generic"), (docx, "docx"))
+    shorthands = (
+        (ghost, "ghost"),
+        (wordpress, "wordpress"),
+        (generic, "generic"),
+        (docx, "docx"),
+        (hackernews, "hackernews"),
+    )
     for flag, name in shorthands:
         if flag and not platform:
             platform = name
@@ -153,7 +178,12 @@ def convert(
                 result: Outcome = process_markdown(src, resolved_target)
             else:
                 result = process_url(
-                    src, platform, resolved_target, screenshot=screenshot, full_thread=full_thread
+                    src,
+                    platform,
+                    resolved_target,
+                    screenshot=screenshot,
+                    full_thread=full_thread,
+                    note=note,
                 )
             log_run(src, result, resolved_target)
             tally[result.status] = tally.get(result.status, 0) + 1

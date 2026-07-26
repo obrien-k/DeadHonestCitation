@@ -110,6 +110,7 @@ class DocxAdapter(PlatformAdapter):
     inject as og/meta tags (the generic extraction reads them)."""
 
     name: ClassVar[str] = "docx"
+    kind: ClassVar[str] = "document"
     content: ClassVar[Selector | list[Selector]] = ("article", {})
 
     def detect(self, soup: BeautifulSoup) -> bool:

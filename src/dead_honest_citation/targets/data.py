@@ -14,18 +14,18 @@ import re
 import time
 from typing import ClassVar
 
+from ..adapters import PLATFORMS
 from ..config import OUTPUT_DIR
 from ..models import Citation, PostMetadata
 from ..network.wayback import WAYBACK_RE
 from .base import OutputTarget
 
-KIND_BY_PLATFORM = {
-    "ghost": "post",
-    "wordpress": "post",
-    "generic": "page",
-    "docx": "document",
-    "proboards": "thread",
+# Kinds for the pseudo-platforms that have no adapter (the passthrough and capture
+# lanes). Real platforms carry their own `kind`, so adding an adapter never means
+# remembering to touch this table.
+KIND_BY_PSEUDO_PLATFORM = {
     "txt": "document",
+    "capture": "page",
 }
 
 CITE_INCLUDE = """{%- comment -%}
@@ -67,7 +67,8 @@ def derive_citation(
         platform_name: Resolved adapter name, mapped to a content kind.
         kind: Overrides the platform→kind map (e.g. a captured image/document).
     """
-    kind = kind or KIND_BY_PLATFORM.get(platform_name, "page")
+    adapter = PLATFORMS.get(platform_name)
+    kind = kind or (adapter.kind if adapter else KIND_BY_PSEUDO_PLATFORM.get(platform_name, "page"))
     if base_dir is not None:
         # A local saved file or .docx — an author's personal copy, not public.
         return Citation(
@@ -150,7 +151,9 @@ def emit_citation(
     if meta.screenshot:
         lines.append(f"screenshot: {_yaml_str(meta.screenshot)}")
     lines.append(f"content: {_yaml_str(content_rel)}")
-    lines.append(f"note: {_yaml_str(meta.screenshot_note)}")
+    # An author's --note is the editorial record and outranks the auto-generated
+    # screenshot caption, which is only a description of the evidence image.
+    lines.append(f"note: {_yaml_str(meta.note or meta.screenshot_note)}")
 
     yml_rel = os.path.join("_data", "sources", f"{slug}.yml")
     yml_path = os.path.join(out_dir, yml_rel)

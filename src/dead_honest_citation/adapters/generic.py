@@ -52,6 +52,7 @@ class GenericAdapter(PlatformAdapter):
     --platform generic / --html selects it outright."""
 
     name: ClassVar[str] = "generic"
+    kind: ClassVar[str] = "page"
     content: ClassVar[Selector | list[Selector]] = [
         ("div", {"class": "entry-content"}),
         ("div", {"class": "post-content"}),
