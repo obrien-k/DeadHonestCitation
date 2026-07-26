@@ -2,7 +2,7 @@
 
 Convert archived web pages — captured on the [Wayback Machine](https://web.archive.org/), saved to disk, or written in Word — into Markdown, deterministically and without rewriting the prose.
 
-The tool is **platform-agnostic** on both ends. A registry of *input adapters* teaches it how to read each source CMS, theme, or format; five ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, **Word `.docx`**, and **ProBoards** forum threads. A symmetric registry of *output targets* decides how results are written — **Jekyll** ([kramdown](https://kramdown.gettalong.org/)-friendly front matter, the default), **CommonMark**, or a **data** target that emits provenance-stamped citation objects. Adding either end is a single registry entry.
+The tool is **platform-agnostic** on both ends. A registry of *input adapters* teaches it how to read each source CMS, theme, or format; six ship in the box — **Ghost**, **WordPress** (generalized across themes), a **generic** HTML adapter for unknown CMSes, **Word `.docx`**, **ProBoards** forum threads, and **Hacker News** item pages. A symmetric registry of *output targets* decides how results are written — **Jekyll** ([kramdown](https://kramdown.gettalong.org/)-friendly front matter, the default), **CommonMark**, or a **data** target that emits provenance-stamped citation objects. Adding either end is a single registry entry.
 
 > Started as a Ghost-only exporter (`ghost-2-md`); renamed to **DeadHonestCitation** in v0.3.0. The Python package is `dead_honest_citation` and the command is `dhc`.
 
@@ -35,6 +35,7 @@ Everything runs through one CLI, `dhc` (installed by `pip install -e .`):
 | `dhc stage` / `dhc promote` / `dhc menu` | Stages converted posts into a Jekyll repo's `_drafts/` and promotes them into `_posts/`. |
 | `dhc wizard` | Guided, interactive flow that ties the above together. |
 | `dhc clean` / `dhc prune` | Output housekeeping. |
+| `dhc --version` | Print the installed version (`-V`). |
 
 The old entry points (`python index.py`, `discover.py`, `to_jekyll.py`, `wizard.py`) still work as thin deprecated shims that translate their flags and delegate to `dhc`.
 
@@ -47,7 +48,7 @@ src/dead_honest_citation/
   config.py       # output paths, .env/environment defaults
   core/           # pipeline.py (orchestration) · sources.py (input layer) ·
                   # capture.py (binary capture tier) · runlog.py · housekeeping.py
-  adapters/       # the PLATFORMS registry: ghost, wordpress, generic, docx, proboards
+  adapters/       # the PLATFORMS registry: ghost, wordpress, generic, docx, proboards, hackernews
   transform/      # HTML→MD machinery: cleanup, images, embeds, footnotes,
                   # front-matter lifting, cp1252 repair
   targets/        # the TARGETS registry: jekyll, commonmark, data (citations)
@@ -59,7 +60,7 @@ src/dead_honest_citation/
   cli/            # the Typer app behind `dhc` (per-source progress bar)
 ```
 
-The converter is built around a **platform adapter registry** (`adapters.PLATFORMS`) of `PlatformAdapter` subclasses (the ABC lives in `adapters/base.py`; output targets have a symmetric `OutputTarget` ABC in `targets/base.py`). Each adapter supplies four pieces, so supporting a new CMS/theme/format means adding one subclass plus its registry entry — no changes to the processing pipeline:
+The converter is built around a **platform adapter registry** (`adapters.PLATFORMS`) of `PlatformAdapter` subclasses (the ABC lives in `adapters/base.py`; output targets have a symmetric `OutputTarget` ABC in `targets/base.py`). Each adapter supplies four required pieces (plus optional ones for threads), so supporting a new CMS/theme/format means adding one subclass plus its registry entry — no changes to the processing pipeline:
 
 | Piece | Responsibility |
 |-------|----------------|
@@ -67,12 +68,14 @@ The converter is built around a **platform adapter registry** (`adapters.PLATFOR
 | `extract_metadata(soup)` | Return a `PostMetadata` dataclass (title, date, description, tags, cover, categories) |
 | `content` | A `(tag_name, attrs)` selector — or a list tried in order — locating the article body |
 | `clean(article)` | Platform-specific body-cleanup pipeline |
+| `kind` | Citation content kind — `post` (default) / `page` / `thread` / `document` |
+| `is_thread` + `render_thread(...)` | Conversation sources (forums, comment threads): rebuild the page as attributed blocks instead of cleaning it as an article. Only the original post is kept unless `--full-thread` |
 
 The pipeline in `core.pipeline.process_url()` is platform-neutral — it calls into the resolved adapter at each step:
 
 1. `sources.load_source()` — fetch a URL (with retry), read a saved `.html`, or convert a `.docx`
 2. `transform.cleanup.remove_wayback_toolbar()` — strip the archive chrome
-3. `adapters.detect_platform()` — pick the adapter (skipped when forced via `--platform`)
+3. `adapters.detect_platform()` — pick the adapter (skipped when forced via `--platform`). Auto-detection never dead-ends: an unrecognized page falls through to `generic`, and a page with no extractable body is preserved verbatim by `capture_page()`
 4. adapter `extract_metadata` — pull front-matter fields
 5. adapter `content` selector — locate the body
 6. adapter `clean` — scrub theme cruft
@@ -140,6 +143,10 @@ dhc convert ./saved-pages/ --recursive     # descend into subdirectories
 # Force a platform instead of auto-detecting
 dhc convert urls.example.txt --wordpress   # aliases: --yaaburnee, -p wp
 dhc convert urls.txt --ghost               # alias: -p gh
+dhc convert "https://news.ycombinator.com/item?id=123" -hn  # aliases: --hacker-news, --hn
+
+# Editorial note on a citation — what the capture itself can't show
+dhc convert <url> --target data --note "the site went dark two months later"
 ```
 
 ### Discovering archived URLs

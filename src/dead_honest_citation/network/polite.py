@@ -19,10 +19,14 @@ from typing import Any
 
 import requests
 
+from .. import __version__
 from ..exceptions import WaybackRateLimitError
 from ..ui import log, warn
 
-USER_AGENT = "dead-honest-citation/0.4 (+https://github.com/obrien-k/DeadHonestCitation)"
+# major.minor only — a UA is an identity, not a build stamp, and patch releases
+# shouldn't churn it. Derived so it can't fall behind the manifest again.
+_UA_VERSION = ".".join(__version__.split(".")[:2])
+USER_AGENT = f"dead-honest-citation/{_UA_VERSION} (+https://github.com/obrien-k/DeadHonestCitation)"
 HEADERS = {"User-Agent": USER_AGENT}
 
 MIN_INTERVAL = float(os.environ.get("DHC_MIN_INTERVAL", "0.5"))

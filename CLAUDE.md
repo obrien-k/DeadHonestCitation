@@ -68,6 +68,9 @@ dhc wizard
 dhc clean          # delete all of output/ (prompts; -y to skip the prompt)
 dhc prune          # drop stale output (older slug dupes, orphaned asset folders)
 
+# Version (derived from pyproject.toml via importlib.metadata — never hand-edited)
+dhc --version                            # alias: -V
+
 # Lint / format / typecheck (config in pyproject.toml)
 ruff check .
 ruff format .

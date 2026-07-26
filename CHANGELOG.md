@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-26
+
 ### Added
 - **A pytest suite** (`tests/`) covering the adapter registry (detection +
   metadata/body extraction per platform), `collect_sources()`, both document
@@ -30,6 +32,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `process_url`/`process_markdown` boundary, which maps each to an `Outcome` — so
   a batch never dies on one bad source and `runlog.jsonl` gets an actionable
   reason. Exhausted 429/503 retries now raise `WaybackRateLimitError`.
+- **Forum original-post model.** A ProBoards source now yields the **original post
+  only** by default — a forum citation is anchored to the OP, with the rest of the
+  thread available at the linked source. `--full-thread` restores every post on the
+  page and, for a *live* thread, crawls the remaining paginated pages too
+  (archived/local captures stay single-page, since a Wayback snapshot rarely includes
+  every page).
+- **Banner-to-first-post cover for forum sources.** The page is captured from the top
+  (banner) down to the bottom of the first post and used as the post's cover image,
+  doubling as citation evidence (described in the citation `note`). The Wayback `if_`
+  raw capture keeps the archive toolbar out of frame. Best-effort (needs playwright).
+- **Hacker News adapter** (`--hacker-news` / `--hn` / `-hn`; `--platform` aliases
+  `hn`, `hacker-news`, `yc`, `ycombinator`). Reads a news.ycombinator.com item
+  page: the submission from `table.fatitem` (title + outbound link, score/author,
+  the `.age[title]` ISO date, and Show/Ask/Tell self-text), comments from
+  `tr.athing.comtr` with `td.ind[indent]` as reply depth. Follows the same
+  original-post model as ProBoards — the submission is the citation anchor, and
+  `--full-thread` appends the comment tree as nested blockquotes.
+- **`--note` / `-n`** records an editorial note on a citation (`--target data`) —
+  what the capture itself cannot show, such as what became of the source after it
+  was archived. `cite.html` already rendered `note`; the only thing feeding it was
+  the screenshot caption, which an author's note now outranks.
+- **`capture_page()`** preserves an auto-resolved page with no extractable body (a
+  JS-rendered app, a landing page) as its snapshot rather than skipping it, so the
+  "never silently dropped" invariant holds for markup as well as binaries.
+- **`dhc --version` / `-V`** — the CLI had no version surface at all.
 
 ### Changed
 - **`network/polite.py` is now a `PoliteSession`.** The module globals became a
@@ -57,18 +84,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   package; `mypy --strict` runs clean and is configured in `pyproject.toml`
   (dev extra now pulls the stub packages). Conversion output is byte-identical
   (verified against `tests/fixtures/` across all five platforms).
-
-### Added
-- **Forum original-post model.** A ProBoards source now yields the **original post
-  only** by default — a forum citation is anchored to the OP, with the rest of the
-  thread available at the linked source. `--full-thread` restores every post on the
-  page and, for a *live* thread, crawls the remaining paginated pages too
-  (archived/local captures stay single-page, since a Wayback snapshot rarely includes
-  every page).
-- **Banner-to-first-post cover for forum sources.** The page is captured from the top
-  (banner) down to the bottom of the first post and used as the post's cover image,
-  doubling as citation evidence (described in the citation `note`). The Wayback `if_`
-  raw capture keeps the archive toolbar out of frame. Best-effort (needs playwright).
+- **Auto-detection never dead-ends.** `detect_platform()` stays strict — it answers
+  "which CMS is this?" and `None` means none — but the pipeline now cascades
+  through to the `generic` adapter and then `capture_page()` instead of aborting a
+  source with "Could not detect platform — re-run with --platform", advice the
+  wizard gave no way to follow. An explicit `--platform` pins the choice and opts
+  out of the cascade, so a forced adapter that finds no body still fails loudly.
+- **Wayback chrome is stripped in both forms.** `remove_wayback_toolbar()` removed
+  only the rendered toolbar (`#wm-*`, `div.wb_*`), which is injected by
+  `bundle-playback.js` at render time — so a raw fetch reached the adapters still
+  carrying the `<head>` rewrite include (web-static.archive.org scripts,
+  `__wm.init`, Ruffle, banner styles). Both are removed now.
+- **The thread model moved onto the adapter contract** — `is_thread`, `kind`,
+  `thread_shot_selector`, and a `render_thread()` hook the pipeline dispatches on,
+  replacing per-platform `if resolved == "proboards"` branches. `derive_citation()`
+  reads `adapter.kind` instead of a hand-maintained platform→kind table, so adding
+  a platform is again one module plus one registry entry.
+- **`dhc wizard` reports real per-source outcomes.** It discarded every `Outcome`
+  and inferred success by diffing `_posts/`, so a hard failure, an already-converted
+  source, and an empty body all printed "already converted, or nothing meaningful".
+- **Version is derived from the manifest.** `__version__` now reads the installed
+  distribution metadata, and the polite User-Agent derives from it — the UA still
+  said `0.3` after the 0.4.0 bump, with three hand-kept literals and nothing
+  keeping them honest.
 
 ### Fixed
 - Windows-1252 punctuation (curly quotes, dashes, ellipsis) on pages served as
@@ -77,6 +115,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `U+0092` — invisible mojibake that also made YAML front matter unparseable
   (`control characters are not allowed`). `fix_cp1252_controls()` remaps the
   `0x80–0x9F` range before parsing; it's a no-op on correctly-decoded UTF-8.
+- An unknown `--platform` value crashed with a raw `KeyError` out of
+  `PLATFORMS[resolved]`, escaping the boundary that guarantees no exception reaches
+  the caller. It is a typed `PlatformDetectError` mapped to a `failed` outcome now.
 
 ## [0.3.0] - 2026-06-20
 
@@ -147,6 +188,8 @@ First public-ready release: a platform-agnostic archive→Markdown converter.
 - Image and cover downloads from the Wayback Machine (prefers `im_` raw captures).
 - Escape `|` in Markdown link text so kramdown doesn't misread it as a table.
 
+[Unreleased]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/obrien-k/DeadHonestCitation/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/obrien-k/DeadHonestCitation/releases/tag/v0.1.0

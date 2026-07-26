@@ -52,18 +52,21 @@ pushed to `archived` via **Save Page Now** to mint a real permalink before it ro
 ## Registries (the two pluggable seams)
 
 - **Input adapters** (existing `PLATFORMS`): `detect / extract_metadata / content /
-  clean`. Content models: *article* (blog) and *thread* (forum — preserve per-post
-  author·date·body rather than flattening). Targets: ghost, wordpress, generic, docx,
+  clean`, plus `kind` and the optional `is_thread`/`render_thread` pair. Content
+  models: *article* (blog) and *thread* (forum, comment thread — preserve per-post
+  author·date·body rather than flattening). Adapters: ghost, wordpress, generic, docx,
   **txt** (trivial passthrough), **proboards** (forum; keys on `windowbg`/`windowbg2`
-  rows, `action=viewprofile&user=` authors, `titlebg`/`cattext` title).
+  rows, `action=viewprofile&user=` authors, `titlebg`/`cattext` title), and
+  **hackernews** (item pages; `table.fatitem` submission + `tr.athing.comtr` tree).
 - **Output targets** (new, symmetric registry): each decides front matter +
   filename/layout + md flavor + asset path. `jekyll` (default, back-compat) ·
-  `commonmark`/`plain` · `hugo` · `data` (emits the Citation Object). The conversion
+  `commonmark`/`plain` · `data` (emits the Citation Object); `hugo` remains unbuilt.
+  The conversion
   core stays target-agnostic — it produces `(metadata, body, assets)`.
 
 ## Discovery
 
-- **Known domain** → `discover.py` CDX enumeration (works today).
+- **Known domain** → `network/wayback.py` CDX enumeration, driven by `dhc discover domain` (works today).
 - **Fuzzy / unknown host** → recover the host via web search first, then CDX. (CDX
   can't guess a host; the reversed urlkey and unknown numbered domains defeat prefix
   match.)
@@ -99,14 +102,15 @@ resuming, never by pushing through blocks.
 3. **Citation Object** as the `data` target (`_data/sources/<id>.yml` + `cite` include). ✅
 4. **ProBoards adapter** + the *thread* content model. ✅
 5. **txt** passthrough adapter. ✅
-6. Discovery host-recovery + Save-Page-Now (`discover.py`). ✅
+6. Discovery host-recovery + Save-Page-Now (`network/wayback.py`, `dhc discover`). ✅
 7. Capture tier (binary/non-HTML capture) + screenshots (optional playwright). ✅
-8. Polite-fetch layer (`netpolite.py`: rate limit / Retry-After / backoff) + JSONL
+8. Polite-fetch layer (`network/polite.py`: rate limit / Retry-After / backoff) + JSONL
    run-log. ✅ (Sequential, so concurrency is bounded at 1.)
+9. **Platform cascade** — auto-detection never dead-ends: an unrecognized page falls
+   through to the `generic` adapter, and one with no extractable body is preserved
+   verbatim by `capture_page()`. `--platform` opts out and still fails loudly. ✅
 
 ### Possible next
 
-- Raw-HTML capture when no adapter matches (today: logged as `failed`, asks for
-  `--platform`).
 - Resume / retry-failed driven by the run-log.
 - `local`→`archived` upgrade and Save-Page-Now wired into the convert flow.

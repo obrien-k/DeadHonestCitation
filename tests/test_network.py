@@ -76,3 +76,27 @@ def test_raise_on_error_false_still_returns_final_429_response() -> None:
         responses.add(responses.GET, URL, status=429)
     resp = polite_get(URL, retries=2, raise_on_error=False)
     assert resp.status_code == 429
+
+
+# --- version surfaces derive from the manifest, never hand-kept ---------------
+
+
+def test_user_agent_derives_from_package_version() -> None:
+    """The polite UA must track the manifest.
+
+    It silently said 0.3 after the v0.4.0 bump — three hand-maintained literals
+    (pyproject, __init__, this UA) with nothing keeping them honest.
+    """
+    from dead_honest_citation import __version__
+    from dead_honest_citation.network.polite import USER_AGENT
+
+    major_minor = ".".join(__version__.split(".")[:2])
+    assert USER_AGENT.startswith(f"dead-honest-citation/{major_minor} ")
+
+
+def test_package_version_matches_installed_distribution() -> None:
+    from importlib.metadata import version
+
+    from dead_honest_citation import __version__
+
+    assert __version__ == version("dead-honest-citation")

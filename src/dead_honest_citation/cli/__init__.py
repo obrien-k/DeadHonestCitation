@@ -4,7 +4,8 @@ from typing import Annotated
 
 import typer
 
-from ..ui import setup_logging
+from .. import __version__
+from ..ui import console, setup_logging
 from .convert import clean, convert, prune
 from .discover import discover_app
 from .stage import menu, promote, stage
@@ -18,11 +19,28 @@ app = typer.Typer(
 )
 
 
+def _version_callback(show: bool) -> None:
+    """Print the version and exit — eager, so `dhc --version` needs no subcommand."""
+    if show:
+        console.print(f"dhc {__version__}")
+        raise typer.Exit()
+
+
 @app.callback()
 def _root(
     verbose: Annotated[
         bool,
         typer.Option("--verbose", "-v", help="Verbose logging (per-request HTTP tracing)."),
+    ] = False,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show the installed version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
     ] = False,
 ) -> None:
     """Configure logging before any subcommand runs."""
