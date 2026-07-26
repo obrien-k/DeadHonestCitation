@@ -198,3 +198,49 @@ def test_generic_content_selector_fallback_to_article() -> None:
     assert article is not None
     assert article.name == "article"
     assert "Body text here." in article.get_text()
+
+
+# --- Hacker News: detection + submission metadata ----------------------------
+
+
+def test_detect_platform_hackernews(fixture_soup: Callable[[str], BeautifulSoup]) -> None:
+    soup = fixture_soup("hn-thread.html")
+    assert detect_platform(soup) == "hackernews"
+
+
+def test_hackernews_extract_metadata(fixture_soup: Callable[[str], BeautifulSoup]) -> None:
+    soup = fixture_soup("hn-thread.html")
+    meta = PLATFORMS["hackernews"].extract_metadata(soup)
+    assert meta.title.startswith("Show HN: Price Per Ball")
+    assert meta.date is not None and meta.date.isoformat() == "2026-02-17"
+    assert "show hn" in meta.tags
+    assert "priceperball.net" in meta.description
+
+
+def test_hackernews_is_a_thread_platform() -> None:
+    adapter = PLATFORMS["hackernews"]
+    assert adapter.is_thread is True
+    assert adapter.kind == "thread"
+
+
+def test_hackernews_op_only_by_default(fixture_soup: Callable[[str], BeautifulSoup]) -> None:
+    """Original-post model: the submission is the citation anchor, comments are not."""
+    soup = fixture_soup("hn-thread.html")
+    body = PLATFORMS["hackernews"].render_thread(
+        soup, "https://news.ycombinator.com/item?id=1", None, False
+    )
+    text = body.get_text(" ", strip=True)
+    assert "I took inspiration from diskprices.com" in text
+    assert "take a peek in the bushes" not in text
+
+
+def test_hackernews_full_thread_keeps_comments(
+    fixture_soup: Callable[[str], BeautifulSoup],
+) -> None:
+    soup = fixture_soup("hn-thread.html")
+    body = PLATFORMS["hackernews"].render_thread(
+        soup, "https://news.ycombinator.com/item?id=1", None, True
+    )
+    text = body.get_text(" ", strip=True)
+    assert "take a peek in the bushes" in text
+    assert "koolba" in text

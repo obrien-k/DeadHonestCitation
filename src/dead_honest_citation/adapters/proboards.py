@@ -52,6 +52,11 @@ class ProBoardsAdapter(PlatformAdapter):
 
     name: ClassVar[str] = "proboards"
     content: ClassVar[Selector | list[Selector]] = ("body", {})
+    kind: ClassVar[str] = "thread"
+    is_thread: ClassVar[bool] = True
+    thread_shot_selector: ClassVar[str | None] = (
+        'td[width="80%"].windowbg, td[width="80%"].windowbg2'
+    )
 
     def detect(self, soup: BeautifulSoup) -> bool:
         """True for a ProBoards/YaBB-lineage forum thread page."""
@@ -85,6 +90,10 @@ class ProBoardsAdapter(PlatformAdapter):
         """
         posts = _proboards_posts(article)
         return proboards_render(posts if full_thread else posts[:1])
+
+    def render_thread(self, article: Tag, url: str, base_dir: str | None, full_thread: bool) -> Tag:
+        """Thread entry point — full_thread also crawls the live thread's later pages."""
+        return proboards_render(proboards_collect(article, url, base_dir, full_thread))
 
 
 def _proboards_message(body_cell: Tag) -> Tag | None:

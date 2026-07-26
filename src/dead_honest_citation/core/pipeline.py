@@ -19,7 +19,6 @@ from markdownify import markdownify as md
 from slugify import slugify
 
 from ..adapters import PLATFORMS, detect_platform
-from ..adapters.proboards import proboards_collect, proboards_render
 from ..config import OUTPUT_DIR
 from ..exceptions import ContentNotFoundError, DHCError, EmitError, FetchError, PlatformDetectError
 from ..models import Outcome, PostMetadata
@@ -44,6 +43,7 @@ def process_url(
     target: str | None = None,
     screenshot: bool = False,
     full_thread: bool = False,
+    note: str | None = None,
 ) -> Outcome:
     """Convert one source — a Wayback/live URL or a local HTML file.
 
@@ -59,13 +59,14 @@ def process_url(
         screenshot: Render the page to a PNG referenced from its citation
             (citation targets only; needs playwright).
         full_thread: Forum sources — keep every post instead of just the OP.
+        note: Editorial note recorded on the citation (citation targets).
 
     Returns:
         The source's terminal Outcome (converted / captured / skipped / failed).
     """
     status(f"\n→ {url}")
     try:
-        return _convert_url(url, platform, target, screenshot, full_thread)
+        return _convert_url(url, platform, target, screenshot, full_thread, note)
     except FetchError as e:
         error(f"  ✗ Failed to load: {e}")
         return Outcome("failed", reason=f"load: {e}")
@@ -86,6 +87,7 @@ def _convert_url(
     target: str | None,
     screenshot: bool,
     full_thread: bool,
+    note: str | None = None,
 ) -> Outcome:
     """The conversion body. Raises DHCError subclasses at failure sites."""
     tgt = resolve_target(target)
@@ -130,6 +132,8 @@ def _convert_url(
 
     # Extract metadata before unwrapping so cover img src retains its Wayback timestamp
     meta = adapter.extract_metadata(soup)
+    if note:
+        meta.note = note
 
     for a in soup.find_all("a", href=True):
         href = a.get("href")
@@ -155,11 +159,11 @@ def _convert_url(
             return capture_page(html, url, tgt, meta)
         raise ContentNotFoundError("No article content found")
 
-    # Forum sources use the original-post model: keep the OP only unless --full-thread,
-    # which also crawls a live thread's later pages (proboards_collect needs the URL, so
-    # it's done here rather than through the adapter's clean()).
-    if resolved == "proboards":
-        article = proboards_render(proboards_collect(article, url, base_dir, full_thread))
+    # Thread sources use the original-post model: keep the OP only unless --full-thread.
+    # render_thread() takes the URL because a paginated thread may need its later pages
+    # crawled, which the clean() contract has no way to express.
+    if adapter.is_thread:
+        article = adapter.render_thread(article, url, base_dir, full_thread)
     else:
         article = adapter.clean(article)
 
@@ -200,22 +204,23 @@ def _convert_url(
         error("  ✗ No meaningful content — skipping.")
         return Outcome("skipped", reason="empty body")
 
-    # A forum source gets a banner→first-post capture: the visual context of the original
+    # A thread source gets a banner→first-post capture: the visual context of the original
     # post. It's the post's cover image and doubles as citation evidence (described in the
-    # citation note). Automatic for the forum model, best-effort (needs playwright); the
+    # citation note). Automatic for the thread model, best-effort (needs playwright); the
     # 'if_' raw capture keeps the Wayback toolbar out of frame.
-    if resolved == "proboards":
+    if adapter.is_thread and adapter.thread_shot_selector:
         shot_dir = os.path.join(OUTPUT_DIR, tgt.asset_dir(slug))
         os.makedirs(shot_dir, exist_ok=True)
         shot_name = f"{slug}-cover.png"
-        first_post = 'td[width="80%"].windowbg, td[width="80%"].windowbg2'
         if screenshot_page(
-            wayback_raw(url), os.path.join(shot_dir, shot_name), end_selector=first_post
+            wayback_raw(url),
+            os.path.join(shot_dir, shot_name),
+            end_selector=adapter.thread_shot_selector,
         ):
             shot_url = tgt.asset_url(slug, shot_name)
             meta.cover = shot_url
             meta.screenshot = shot_url
-            meta.screenshot_note = "Banner-to-first-post capture of the original forum thread."
+            meta.screenshot_note = "Banner-to-first-post capture of the original thread."
     # Other sources: an optional full-page evidence shot for citation targets.
     elif screenshot and tgt.is_citation:
         shot_dir = os.path.join(OUTPUT_DIR, tgt.asset_dir(slug))

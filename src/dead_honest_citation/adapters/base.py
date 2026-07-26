@@ -23,10 +23,20 @@ class PlatformAdapter(ABC):
         content: A selector locating the article body — or a list of them tried
             in order, because themes disagree on the body wrapper. The pipeline
             falls back to <article>/<main> when none match.
+        kind: Content kind for the citation record (post / page / thread / …).
+        is_thread: True for conversation sources (forums, comment threads). The
+            pipeline routes these through render_thread() instead of clean(),
+            and applies the original-post model — only the OP is kept unless
+            --full-thread.
+        thread_shot_selector: CSS selector for the end of a thread's automatic
+            banner→first-post screenshot, or None for no automatic capture.
     """
 
     name: ClassVar[str]
     content: ClassVar[Selector | list[Selector]]
+    kind: ClassVar[str] = "post"
+    is_thread: ClassVar[bool] = False
+    thread_shot_selector: ClassVar[str | None] = None
 
     @abstractmethod
     def detect(self, soup: BeautifulSoup) -> bool:
@@ -39,6 +49,14 @@ class PlatformAdapter(ABC):
     @abstractmethod
     def clean(self, article: Tag) -> Tag:
         """Scrub the located body of theme cruft; returns the cleaned body."""
+
+    def render_thread(self, article: Tag, url: str, base_dir: str | None, full_thread: bool) -> Tag:
+        """Rebuild a conversation as attributed blocks (is_thread adapters only).
+
+        Takes the URL/base_dir because a live thread may need its later pages
+        crawled, which the clean() contract has no way to express.
+        """
+        raise NotImplementedError(f"{self.name} is not a thread platform")
 
 
 def as_tag(node: object) -> Tag | None:

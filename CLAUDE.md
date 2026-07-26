@@ -42,8 +42,12 @@ dhc convert urls.txt --target commonmark # aliases: cm, plain, md
 dhc convert urls.txt --target data       # → _data/sources/<id>.yml + _sources/<id>.md
 dhc convert urls.txt --target data --screenshot  # render each page (needs playwright)
 
-# Forum threads: original post only by default; --full-thread keeps every post
+# Threads (forums, Hacker News): original post only by default; --full-thread keeps every post
 dhc convert thread-url --full-thread
+dhc convert "https://news.ycombinator.com/item?id=47048633" -hn   # --hacker-news / --hn
+
+# Editorial note recorded on each citation (--target data) — what the capture can't show
+dhc convert <url> --target data --note "5 months later the site is down, fortunately archive.org-ed"
 
 # Discover URLs without knowing them: enumerate / recover / save
 dhc discover domain example.com --contains foo   # enumerate a domain's captures
@@ -86,10 +90,12 @@ loose Markdown/`.txt`**; non-HTML URLs (PDF/image/…) are **captured verbatim**
 of dropped. It is **platform-agnostic on both ends** via two symmetric registries:
 
 - **Input adapters** (`adapters.PLATFORMS`) — recognize and read a source CMS/theme/format.
-  Five are built in, one module each under `adapters/`: `ghost`, `wordpress` (yaaburnee +
+  Six are built in, one module each under `adapters/`: `ghost`, `wordpress` (yaaburnee +
   generalized; aliases `wp`/`yaaburnee`), `generic` (arbitrary pages — `--html`, and the
   automatic fallback when no CMS is recognized),
-  `docx` (Word; aliases `doc`/`word`), and `proboards` (forum threads; aliases `pb`/`forum`).
+  `docx` (Word; aliases `doc`/`word`), `proboards` (forum threads; aliases `pb`/`forum`),
+  and `hackernews` (news.ycombinator.com item pages; aliases `hn`/`hacker-news`/`yc`/
+  `ycombinator`, flag `--hacker-news`/`--hn`/`-hn`).
 - **Output targets** (`targets.TARGETS`) — decide how results are written, one module each
   under `targets/`: `jekyll` (default, back-compat), `commonmark` (aliases `cm`/`plain`/`md`),
   and `data` (provenance-stamped citation objects; aliases `citation`/`cite`).
@@ -169,15 +175,25 @@ wrapped HTML and reads metadata like any other CMS. Embedded images are extracte
 temp dir during the mammoth conversion. `mammoth` is imported lazily inside
 `docx_to_html()`, so the dependency is only required when actually converting a `.docx`.
 
-**ProBoards / thread content model** — forum threads are conversations, not articles.
-`proboards` has no `<article>` (its `content` selector is the whole `<body>`);
-`adapters/proboards.py` rebuilds the table-soup into attributed blocks — `**author** — date`
-+ the message as a blockquote — keying on the 20%/80% `windowbg`/`windowbg2` post cells,
-the `« Reply #N on <date> »` header, and the `<hr>` message boundary. **Original-post
-model**: by default only the OP is kept (the citation anchor); `--full-thread` keeps every
-post and, for a live thread, crawls later pages (`proboards_collect()`). A forum source
-also gets an automatic banner→first-post screenshot as its cover/citation evidence.
-`kind` is `thread`.
+**Thread content model** — forums and comment threads are conversations, not articles,
+so an adapter sets `is_thread = True` and implements `render_thread(article, url,
+base_dir, full_thread)` instead of being cleaned like a document. The pipeline dispatches
+on the flag (no per-platform branches), and `thread_shot_selector` drives the automatic
+banner→first-post screenshot used as cover/citation evidence. **Original-post model**: by
+default only the OP is kept — it is what a citation anchors to — and `--full-thread` keeps
+the rest. Both thread adapters render the same shape: `**author** — date` + the message as
+a blockquote. `kind` is `thread`.
+
+- `proboards` has no `<article>` (its `content` selector is the whole `<body>`);
+  `adapters/proboards.py` rebuilds the table-soup keying on the 20%/80%
+  `windowbg`/`windowbg2` post cells, the `« Reply #N on <date> »` header, and the `<hr>`
+  message boundary. `--full-thread` also crawls a live thread's later pages
+  (`proboards_collect()`).
+- `hackernews` reads an HN item page: the submission from `table.fatitem` (`.titleline a`
+  for title + outbound link, `.subtext` for score/author/`.age[title]` ISO date, `.toptext`
+  for Show/Ask/Tell self-text), comments from `tr.athing.comtr` with `td.ind[indent]` as
+  reply depth, rendered as nested blockquotes. No crawl needed — HN serves the whole
+  thread on the item page.
 
 **Output targets** — each `TARGETS[name]` entry is an `OutputTarget` subclass
 (`targets/base.py`): `doc_relpath`/`asset_dir`/`asset_url`/`flavor` plus a `write()`

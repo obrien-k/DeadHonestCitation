@@ -11,6 +11,7 @@ from .base import PlatformAdapter, Selector
 from .docx import DocxAdapter
 from .generic import GenericAdapter
 from .ghost import GhostAdapter
+from .hackernews import HackerNewsAdapter
 from .proboards import ProBoardsAdapter
 from .wordpress import WordPressAdapter
 
@@ -29,6 +30,7 @@ PLATFORMS: dict[str, PlatformAdapter] = {
     for adapter in (
         GhostAdapter(),
         WordPressAdapter(),
+        HackerNewsAdapter(),
         ProBoardsAdapter(),
         DocxAdapter(),
         GenericAdapter(),
@@ -45,6 +47,10 @@ PLATFORM_ALIASES = {
     "word": "docx",
     "pb": "proboards",
     "forum": "proboards",
+    "hn": "hackernews",
+    "hacker-news": "hackernews",
+    "yc": "hackernews",
+    "ycombinator": "hackernews",
 }
 
 

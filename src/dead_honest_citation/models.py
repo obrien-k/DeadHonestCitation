@@ -28,6 +28,9 @@ class PostMetadata:
             from the first tag when empty.
         screenshot: In-document URL of a rendered page capture, or None.
         screenshot_note: Caption describing what the screenshot shows.
+        note: Editorial note for the citation — what the capture itself cannot
+            show, such as what became of the source afterwards. Author-supplied
+            (--note); outranks screenshot_note as the rendered citation note.
     """
 
     title: str
@@ -38,6 +41,7 @@ class PostMetadata:
     categories: list[str] = field(default_factory=list)
     screenshot: str | None = None
     screenshot_note: str = ""
+    note: str = ""
 
 
 @dataclass(frozen=True)
