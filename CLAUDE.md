@@ -87,7 +87,8 @@ of dropped. It is **platform-agnostic on both ends** via two symmetric registrie
 
 - **Input adapters** (`adapters.PLATFORMS`) — recognize and read a source CMS/theme/format.
   Five are built in, one module each under `adapters/`: `ghost`, `wordpress` (yaaburnee +
-  generalized; aliases `wp`/`yaaburnee`), `generic` (opt-in `--html`, arbitrary pages),
+  generalized; aliases `wp`/`yaaburnee`), `generic` (arbitrary pages — `--html`, and the
+  automatic fallback when no CMS is recognized),
   `docx` (Word; aliases `doc`/`word`), and `proboards` (forum threads; aliases `pb`/`forum`).
 - **Output targets** (`targets.TARGETS`) — decide how results are written, one module each
   under `targets/`: `jekyll` (default, back-compat), `commonmark` (aliases `cm`/`plain`/`md`),
@@ -119,7 +120,8 @@ Package layout (each module's role):
   API unchanged). Exhausted 429/503 retries raise `WaybackRateLimitError`.
 - `exceptions.py` — the `DHCError` hierarchy (`FetchError`, `WaybackRateLimitError` —
   also a `requests.RequestException` so discovery keeps catching it —,
-  `PlatformDetectError`, `ContentNotFoundError`, `EmitError`). Raised at the pipeline/
+  `PlatformDetectError` — an unknown `--platform` value, not a failed sniff —,
+  `ContentNotFoundError`, `EmitError`). Raised at the pipeline/
   network failure sites and caught at the `process_url`/`process_markdown` boundary,
   which maps each to an `Outcome` so a batch never dies on one source.
 - `ui.py` — the Rich `Console` singleton (stdout) + a stderr console + `logging` setup
@@ -191,15 +193,24 @@ provenance** (`derive_citation`): `archived` (Wayback permalink + snapshot date)
 **Capture tier** — `process_url()` inspects `Content-Type` up front; a non-markup URL
 (PDF/image/zip/…) is preserved by `capture_binary()` (saves the bytes as an asset +
 emits a record/citation, `kind` from the type) rather than forced through the article
-pipeline. The invariant: every source ends `converted`, `captured`, `skipped`, or
-`failed` — never silently dropped.
+pipeline. `capture_page()` is the same idea for markup: an auto-resolved page with no
+extractable body (a JS-rendered app, a landing page) has its snapshot saved verbatim
+instead of being skipped. The invariant: every source ends `converted`, `captured`,
+`skipped`, or `failed` — never silently dropped.
+
+**Platform cascade** — auto-detection never refuses to try. `detect_platform()` stays
+strict (it answers "which CMS is this?"; `None` means none, and `GenericAdapter.detect()`
+is always `False` so it can't shadow a real platform), but the pipeline falls through:
+recognized adapter → `generic` → `capture_page()`. `--platform` pins the choice and opts
+out of the cascade — a forced adapter that finds no body is a wrong-adapter error and
+stays loud. `PlatformDetectError` now marks only an unknown `--platform` *value*.
 
 **Processing pipeline** — `dhc convert` resolves tokens via `collect_sources()`, the
 platform (`--platform`/shorthands, else auto-detected), and the target (`--target`).
 For each source `process_url()` (or `process_markdown()` for `.md`/`.txt`):
 1. Loads the source — URLs via `polite_get()` (non-markup → `capture_binary()`); local files via `load_source()` (HTML, or `.docx` → `docx_to_html()`)
-2. Strips the Wayback toolbar (`remove_wayback_toolbar()`)
-3. Resolves the platform (`detect_platform()` when not forced) and selects its adapter
+2. Strips the Wayback chrome — both the rendered toolbar and the `<head>` rewrite include that loads it (`remove_wayback_toolbar()`)
+3. Resolves the platform (`detect_platform()` when not forced, else `generic`) and selects its adapter
 4. Extracts metadata via the adapter's `extract_metadata`
 5. Locates article content via the adapter's `content` selector, falling back to `<article>`/`<main>`
 6. Cleans the body via the adapter's `clean` (forum sources: OP-only render)

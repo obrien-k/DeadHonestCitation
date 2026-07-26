@@ -69,10 +69,30 @@ def clean_wordpress_cruft(soup: Tag) -> Tag:
     return soup
 
 
+# Wayback's playback assets, by URL. The rewrite include pulls bundle-playback.js,
+# wombat.js, ruffle, and the banner stylesheets from this host.
+_WB_ASSET = re.compile(r"web-static\.archive\.org|/_static/")
+# Inline bootstrap the rewrite include emits alongside those assets.
+_WB_INLINE = re.compile(r"__wm\.|RufflePlayer|wombat")
+
+
 def remove_wayback_toolbar(soup: Tag) -> Tag:
-    """Strip the Wayback Machine toolbar injected at the top of archived pages."""
+    """Strip the Wayback Machine chrome injected into archived pages.
+
+    Two separate things, both archive furniture rather than page content: the
+    rendered toolbar (`#wm-*`, `div.wb_*`) and the `<head>` rewrite include that
+    loads it. The toolbar only exists once bundle-playback.js has run, so a raw
+    fetch usually carries the include alone — stripping just the toolbar would
+    leave every archived page's markup salted with archive.org assets.
+    """
     for el in soup.find_all(id=re.compile(r"^wm-")):
         el.decompose()
     for el in soup.find_all("div", class_=re.compile(r"wb_")):
         el.decompose()
+    for el in soup.find_all(["script", "link"]):
+        ref = el.get("src") or el.get("href") or ""
+        if isinstance(ref, str) and _WB_ASSET.search(ref):
+            el.decompose()
+        elif not ref and _WB_INLINE.search(el.get_text()):
+            el.decompose()
     return soup
