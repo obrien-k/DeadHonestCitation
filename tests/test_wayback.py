@@ -10,6 +10,7 @@ from dead_honest_citation.network.wayback import (
     unwrap_wayback,
     wayback_image_candidates,
     wayback_raw,
+    wayback_resolve,
 )
 
 # --- unwrap_wayback, including im_/if_ suffixes ------------------------------
@@ -61,6 +62,27 @@ def test_wayback_image_candidates_non_wayback_src_passes_through() -> None:
     assert wayback_image_candidates("https://cdn.example.com/img.png") == [
         "https://cdn.example.com/img.png"
     ]
+
+
+# --- wayback_resolve -----------------------------------------------------------
+
+
+def test_wayback_resolve_root_relative_src() -> None:
+    page = "https://web.archive.org/web/20260111154755/https://www.example.com/a/b/"
+    assert wayback_resolve("/wp-content/x.jpg", page) == (
+        "https://web.archive.org/web/20260111154755im_/https://www.example.com/wp-content/x.jpg"
+    )
+
+
+def test_wayback_resolve_page_relative_src_and_capture_suffix() -> None:
+    page = "https://web.archive.org/web/20260111154755id_/https://www.example.com/a/b/"
+    assert wayback_resolve("img/x.jpg", page) == (
+        "https://web.archive.org/web/20260111154755im_/https://www.example.com/a/b/img/x.jpg"
+    )
+
+
+def test_wayback_resolve_non_wayback_page_is_none() -> None:
+    assert wayback_resolve("/x.jpg", "https://www.example.com/a/") is None
 
 
 # --- wayback_raw ---------------------------------------------------------------

@@ -49,6 +49,10 @@ dhc convert "https://news.ycombinator.com/item?id=47048633" -hn   # --hacker-new
 # Editorial note recorded on each citation (--target data) — what the capture can't show
 dhc convert <url> --target data --note "5 months later the site is down, fortunately archive.org-ed"
 
+# A hand-fetched Wayback capture (one local file): cite it as archived, not local;
+# relative image srcs are fetched from the same snapshot's im_ capture
+dhc convert saved.html --target data --archived-from "https://web.archive.org/web/<ts>/<url>"
+
 # Discover URLs without knowing them: enumerate / recover / save
 dhc discover domain example.com --contains foo   # enumerate a domain's captures
 dhc discover recover myoldforum                  # recover an unknown host by name

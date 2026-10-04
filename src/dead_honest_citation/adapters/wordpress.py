@@ -22,12 +22,14 @@ class WordPressAdapter(PlatformAdapter):
     name: ClassVar[str] = "wordpress"
     # WP themes disagree on the body wrapper — try the common ones in order.
     # yaaburnee uses .post-content; later/generic themes use .entry-content;
-    # td-/article-content cover a few more. The pipeline falls back to <article>.
+    # td-/article-content cover a few more, and article-body is Chicago Magazine's
+    # GeneratePress child theme. The pipeline falls back to <article>.
     content: ClassVar[Selector | list[Selector]] = [
         ("div", {"class": "post-content"}),
         ("div", {"class": "entry-content"}),
         ("div", {"class": "td-post-content"}),
         ("div", {"class": "article-content"}),
+        ("div", {"class": "article-body"}),
     ]
 
     def detect(self, soup: BeautifulSoup) -> bool:
@@ -116,7 +118,9 @@ def _first_parsable_date(soup: BeautifulSoup, name_meta_fallback: bool = True) -
         meta_pub = as_tag(soup.find("meta", {"name": "published_time"}))
     if attr_str(meta_pub, "content"):
         candidates.append(attr_str(meta_pub, "content"))
-    for cls in ("post-date", "entry-date", "published", "posted-on"):
+    # art-timestamp: Chicago Magazine ("January 24, 2008, 4:40 pm"), whose
+    # article:published_time meta is emitted empty.
+    for cls in ("post-date", "entry-date", "published", "posted-on", "art-timestamp"):
         el = as_tag(soup.find(class_=cls))
         if el:
             candidates.append(attr_str(el, "datetime") or el.get_text(" ", strip=True))

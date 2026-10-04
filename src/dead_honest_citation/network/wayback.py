@@ -4,6 +4,7 @@ image candidates) and discovery (CDX enumeration, host recovery, Save Page Now).
 """
 
 import re
+from urllib.parse import urljoin
 
 import requests
 
@@ -55,6 +56,23 @@ def wayback_image_candidates(src: str) -> list[str]:
     if timestamp:
         return [f"https://web.archive.org/web/{timestamp}im_/{original}", original]
     return [src, original]
+
+
+def wayback_resolve(src: str, archive_url: str) -> str | None:
+    """Resolve a page-relative src against an archived page, as a raw (`im_`) capture.
+
+    A locally saved copy of an archived page keeps its original relative srcs
+    ("/wp-content/…"); joined against the page's original URL and pinned to the
+    same snapshot timestamp, they point at the archive's copy of the asset.
+    None when archive_url is not a timestamped Wayback permalink.
+    """
+    m = re.match(
+        r"(?:https?://web\.archive\.org)?/web/(\d+)(?:[a-z]{2,3}_)?/(https?://.+)", archive_url
+    )
+    if not m:
+        return None
+    timestamp, original = m.groups()
+    return f"https://web.archive.org/web/{timestamp}im_/{urljoin(original, src)}"
 
 
 def wayback_raw(url: str) -> str:

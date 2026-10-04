@@ -6,6 +6,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`--archived-from <wayback-permalink>`** on `dhc convert`, for a single local
+  file that is a hand-fetched copy of a Wayback capture (for example, when
+  `web.archive.org` can't be reached from where `dhc` runs). The citation is
+  stamped `archived` with that permalink and its snapshot date instead of
+  `local` + the filename, and relative image srcs missing from the files-dir are
+  fetched from the same snapshot's `im_` capture (`wayback_resolve()`).
+
+### Fixed
+- **WordPress: GeneratePress `art-*` child themes (Chicago Magazine).** The body
+  is located via `.article-body` (the header block — title/deck/byline/date — no
+  longer leaks into it), and the date falls back to `.art-timestamp` text when
+  `article:published_time` is emitted empty.
+
 ## [0.4.0] - 2026-07-26
 
 ### Added

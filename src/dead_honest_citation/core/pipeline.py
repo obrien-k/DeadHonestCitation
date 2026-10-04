@@ -44,6 +44,7 @@ def process_url(
     screenshot: bool = False,
     full_thread: bool = False,
     note: str | None = None,
+    archived_from: str | None = None,
 ) -> Outcome:
     """Convert one source — a Wayback/live URL or a local HTML file.
 
@@ -60,13 +61,16 @@ def process_url(
             (citation targets only; needs playwright).
         full_thread: Forum sources — keep every post instead of just the OP.
         note: Editorial note recorded on the citation (citation targets).
+        archived_from: Wayback permalink a local source was saved from. The
+            citation is stamped `archived` with that permalink instead of
+            `local`, and relative image srcs resolve against the snapshot.
 
     Returns:
         The source's terminal Outcome (converted / captured / skipped / failed).
     """
     status(f"\n→ {url}")
     try:
-        return _convert_url(url, platform, target, screenshot, full_thread, note)
+        return _convert_url(url, platform, target, screenshot, full_thread, note, archived_from)
     except FetchError as e:
         error(f"  ✗ Failed to load: {e}")
         return Outcome("failed", reason=f"load: {e}")
@@ -88,6 +92,7 @@ def _convert_url(
     screenshot: bool,
     full_thread: bool,
     note: str | None = None,
+    archived_from: str | None = None,
 ) -> Outcome:
     """The conversion body. Raises DHCError subclasses at failure sites."""
     tgt = resolve_target(target)
@@ -189,7 +194,7 @@ def _convert_url(
         detail(f"  ↷ Already exists, skipping: {doc_relpath}")
         return Outcome("skipped", doc_relpath, reason="exists")
 
-    article = download_images(article, slug, base_dir, tgt)
+    article = download_images(article, slug, base_dir, tgt, archived_from)
     article, embed_notes = convert_embeds(article, base_dir)
     article, md_footnotes = convert_footnotes(article)
 
@@ -229,9 +234,12 @@ def _convert_url(
         if screenshot_page(url, os.path.join(shot_dir, shot_name)):
             meta.screenshot = tgt.asset_url(slug, shot_name)
 
+    # A local copy of a known snapshot cites the snapshot: provenance reads the
+    # permalink as if it had been fetched, never the local filename.
+    cite_url, cite_base = (archived_from, None) if archived_from else (url, base_dir)
     try:
         written = tgt.write(
-            doc_relpath, url, base_dir, resolved, slug, meta, markdown, md_footnotes
+            doc_relpath, cite_url, cite_base, resolved, slug, meta, markdown, md_footnotes
         )
     except DHCError:
         raise

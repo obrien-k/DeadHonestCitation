@@ -1,6 +1,7 @@
 """dhc convert / clean / prune — the conversion pipeline and output housekeeping."""
 
 import os
+import re
 from typing import Annotated
 
 import typer
@@ -17,7 +18,7 @@ from ..config import RUNLOG
 from ..core.housekeeping import clean_output, prune_output
 from ..core.pipeline import process_markdown, process_url
 from ..core.runlog import log_run
-from ..core.sources import collect_sources, is_markdown_source
+from ..core.sources import collect_sources, is_local_source, is_markdown_source
 from ..models import Outcome
 from ..targets import TARGET_ALIASES, TARGETS
 from ..ui import console, detail, status, warn
@@ -112,6 +113,16 @@ def convert(
             "what became of the source since capture.",
         ),
     ] = None,
+    archived_from: Annotated[
+        str | None,
+        typer.Option(
+            "--archived-from",
+            help="Wayback permalink a single local source was saved from "
+            "(web.archive.org/web/<timestamp>/<url>). Its citation is stamped "
+            "archived with that permalink instead of local, and missing images "
+            "are fetched from the same snapshot.",
+        ),
+    ] = None,
     full_thread: Annotated[
         bool,
         typer.Option(
@@ -152,6 +163,14 @@ def convert(
     if not source_list:
         warn("No sources to process.")
         raise typer.Exit(0)
+    if archived_from is not None:
+        # One permalink names one snapshot, so it can only vouch for one local copy.
+        if not re.match(r"https?://web\.archive\.org/web/\d{8,14}[a-z_]*/https?://", archived_from):
+            raise typer.BadParameter(
+                f"--archived-from needs a timestamped Wayback permalink, got {archived_from!r}"
+            )
+        if len(source_list) != 1 or not is_local_source(source_list[0]):
+            raise typer.BadParameter("--archived-from applies to exactly one local saved page")
 
     mode = f"as '{platform}'" if platform else "auto-detecting platform"
     status(f"Processing {len(source_list)} source(s), {mode}, → {resolved_target}…")
@@ -184,6 +203,7 @@ def convert(
                     screenshot=screenshot,
                     full_thread=full_thread,
                     note=note,
+                    archived_from=archived_from,
                 )
             log_run(src, result, resolved_target)
             tally[result.status] = tally.get(result.status, 0) + 1

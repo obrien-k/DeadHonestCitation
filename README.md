@@ -147,6 +147,9 @@ dhc convert "https://news.ycombinator.com/item?id=123" -hn  # aliases: --hacker-
 
 # Editorial note on a citation — what the capture itself can't show
 dhc convert <url> --target data --note "the site went dark two months later"
+
+# A Wayback capture you saved by hand (curl/browser) — cite the snapshot, not the file
+dhc convert saved.html --target data --archived-from "https://web.archive.org/web/<ts>/<url>"
 ```
 
 ### Discovering archived URLs
