@@ -19,6 +19,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is located via `.article-body` (the header block — title/deck/byline/date — no
   longer leaks into it), and the date falls back to `.art-timestamp` text when
   `article:published_time` is emitted empty.
+- **WordPress description** now reads `og:description` → `meta description` (as
+  the generic adapter does) before deriving one from the first paragraph, which a
+  drop-cap `<span>` splits ("A fter…").
 
 ## [0.4.0] - 2026-07-26
 

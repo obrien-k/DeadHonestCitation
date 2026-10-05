@@ -55,8 +55,9 @@ class WordPressAdapter(PlatformAdapter):
         .entry-title → og:title → h1; date from <meta article:published_time> →
         <time datetime> → .post-date/.entry-date text; tags from the yaaburnee
         tag-* classes on <article>; categories from the .entry-meta
-        post-category badge. Description is left empty (WP themes rarely emit a
-        per-post one) and derived from the first body paragraph in the pipeline.
+        post-category badge. Description from og:description → meta description
+        when the theme emits one, else left empty and derived from the first body
+        paragraph in the pipeline.
         """
         # Title: .entry-title → og:title → first h1
         title = ""
@@ -92,8 +93,21 @@ class WordPressAdapter(PlatformAdapter):
                 if a.get_text(strip=True) and slugify(a.get_text(strip=True)) not in CATEGORY_NOISE
             ]
 
+        # Description: og:description → meta description. Many themes emit none,
+        # but when one exists it beats the first paragraph (drop caps split it).
+        description = ""
+        for m in (
+            as_tag(soup.find("meta", property="og:description")),
+            as_tag(soup.find("meta", {"name": "description"})),
+        ):
+            if attr_str(m, "content"):
+                description = attr_str(m, "content").strip()
+                break
+
         # The theme has no per-post cover; body images are kept inline instead.
-        return PostMetadata(title=title, date=date, tags=tags, categories=categories)
+        return PostMetadata(
+            title=title, date=date, description=description, tags=tags, categories=categories
+        )
 
     def clean(self, article: Tag) -> Tag:
         """Cleaning pipeline for yaaburnee WordPress article bodies."""

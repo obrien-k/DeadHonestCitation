@@ -115,6 +115,7 @@ def test_wordpress_art_body_theme(fixture_soup: Callable[[str], BeautifulSoup]) 
     meta = PLATFORMS["wordpress"].extract_metadata(soup)
     assert meta.title == "Signal Over Noise"
     assert meta.date == dt.date(2009, 3, 3)
+    assert meta.description == "A short interview about keeping old broadcasts alive."
     selectors = PLATFORMS["wordpress"].content
     assert isinstance(selectors, list)
     body = next(soup.find(n, a) for n, a in selectors if soup.find(n, a))
