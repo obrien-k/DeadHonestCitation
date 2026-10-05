@@ -229,7 +229,7 @@ The **`data`** target writes each source as a citation rather than a post:
 - `_sources/<id>.md` — the extracted content
 - `_includes/cite.html` — a plugin-free Jekyll include, shipped once
 
-Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each page to a PNG and reference it from the citation (optional; needs the `screenshot` extra). See `docs/DESIGN.md` for the citation object and the rest of the direction.
+Each record carries **honest provenance**: `archived` (a Wayback permalink + snapshot date), `live` (URL + access date), or `local` (a saved file — never claims a public link). Cite it in a document with `{% include cite.html id="some-slug" %}`. Add `--screenshot` to render each archived or local page to a PNG and reference it from the citation (optional; needs the `screenshot` extra). A **live** URL gets its photo-record automatically, but only if it passes the legitimacy gate (not a 404 or soft 404, not parked, no redirect to the homepage or off-site, a recognized CMS) — see `docs/adr/0001-live-copy-legitimacy-gate.md`. See `docs/DESIGN.md` for the citation object and the rest of the direction.
 
 A source that isn't convertible HTML — a PDF, image, or other binary — is **captured verbatim** (saved as an asset, recorded with a reference) rather than dropped, so a run preserves everything it touches. Each source's outcome (converted / captured / skipped / failed) is appended to `output/runlog.jsonl`.
 
@@ -273,7 +273,8 @@ pip install -e ".[dev]"
 ruff check .       # lint
 ruff format .      # format
 mypy               # strict type-check (src/)
-pytest             # offline, mocked HTTP (`responses`); runs in well under a second
+pytest             # offline: mocked HTTP (`responses`) + a local HTTP server; browser tests drive Chromium
+pytest -m "not browser"   # skip the Playwright tests (they skip themselves without playwright + chromium)
 ```
 
 Configuration lives in `pyproject.toml`. `tests/fixtures/` holds the offline sample

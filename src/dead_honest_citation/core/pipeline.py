@@ -24,7 +24,7 @@ from ..exceptions import ContentNotFoundError, DHCError, EmitError, FetchError, 
 from ..models import Outcome, PostMetadata
 from ..network.polite import polite_get
 from ..network.screenshot import screenshot_page
-from ..network.wayback import unwrap_wayback, wayback_raw
+from ..network.wayback import WAYBACK_RE, unwrap_wayback, wayback_raw
 from ..targets import resolve_target
 from ..transform.cleanup import remove_wayback_toolbar
 from ..transform.embeds import convert_embeds
@@ -34,6 +34,7 @@ from ..transform.frontmatter import first_markdown_heading, parse_simple_front_m
 from ..transform.images import download_cover, download_images
 from ..ui import detail, error, status, success, warn
 from .capture import capture_binary, capture_page, is_markup
+from .legitimacy import Legitimacy, assess_live
 from .sources import is_local_source, load_source
 
 
@@ -97,6 +98,7 @@ def _convert_url(
     """The conversion body. Raises DHCError subclasses at failure sites."""
     tgt = resolve_target(target)
     base_dir: str | None
+    resp: requests.Response | None = None
     if is_local_source(url):
         try:
             html, base_dir = load_source(url)
@@ -118,6 +120,17 @@ def _convert_url(
     html = fix_cp1252_controls(html)
     soup = BeautifulSoup(html, "html.parser")
     remove_wayback_toolbar(soup)  # mutates in place
+
+    # A live copy cited by a citation target must pass the legitimacy gate
+    # (ADR-0001) before it earns a photo-record: judged on the response already in
+    # hand, before anything below mutates the soup.
+    verdict: Legitimacy | None = None
+    if resp is not None and tgt.is_citation and not WAYBACK_RE.match(url):
+        verdict = assess_live(url, resp, soup)
+        if verdict.ok:
+            detail(f"  · live copy is legitimate: {verdict.reason}")
+        else:
+            warn(f"  ⚠ live copy failed the legitimacy gate: {verdict.reason} — no photo-record")
 
     # Platform cascade. detect_platform() stays strict — it answers "which CMS is
     # this?" and None means none — but an unrecognized page is still a page, so the
@@ -226,7 +239,19 @@ def _convert_url(
             meta.cover = shot_url
             meta.screenshot = shot_url
             meta.screenshot_note = "Banner-to-first-post capture of the original thread."
-    # Other sources: an optional full-page evidence shot for citation targets.
+    # A legitimate live copy: an automatic full-page photo-record of the page as it
+    # stands today (ADR-0001). One that failed the gate gets none, whatever the flag.
+    elif verdict is not None:
+        if verdict.ok:
+            shot_dir = os.path.join(OUTPUT_DIR, tgt.asset_dir(slug))
+            os.makedirs(shot_dir, exist_ok=True)
+            shot_name = f"{slug}-live.png"
+            if screenshot_page(verdict.final_url, os.path.join(shot_dir, shot_name)):
+                meta.screenshot = tgt.asset_url(slug, shot_name)
+                meta.screenshot_note = (
+                    f"Live capture {dt.date.today().isoformat()}: {verdict.reason}."
+                )
+    # Archived/local sources: an optional full-page evidence shot for citation targets.
     elif screenshot and tgt.is_citation:
         shot_dir = os.path.join(OUTPUT_DIR, tgt.asset_dir(slug))
         os.makedirs(shot_dir, exist_ok=True)

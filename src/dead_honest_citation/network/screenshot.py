@@ -1,6 +1,13 @@
 """Page-to-PNG rendering for citation evidence (lazy, optional playwright)."""
 
+from pathlib import Path
+from typing import TYPE_CHECKING
+from urllib.parse import urlparse
+
 from ..ui import warn
+
+if TYPE_CHECKING:
+    from playwright.sync_api import FloatRect
 
 
 def screenshot_page(
@@ -30,12 +37,15 @@ def screenshot_page(
             "  ⚠ screenshots need playwright: pip install playwright && playwright install chromium"
         )
         return False
+    # Playwright navigates URLs only; a local saved page needs a file:// URI.
+    if not urlparse(url).scheme:
+        url = Path(url).resolve().as_uri()
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             page = browser.new_page(viewport={"width": 1024, "height": 1400})
             page.goto(url, wait_until="networkidle", timeout=timeout)
-            clip = None
+            clip: FloatRect | None = None
             if end_selector:
                 el = page.query_selector(end_selector)
                 box = el.bounding_box() if el else None
