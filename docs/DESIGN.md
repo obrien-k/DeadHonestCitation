@@ -86,6 +86,10 @@ resuming, never by pushing through blocks.
 
 ## Decisions
 
+Later decisions are recorded as ADRs in [`docs/adr/`](adr/README.md), starting with
+[ADR-0001](adr/0001-live-copy-legitimacy-gate.md): a live copy earns a photo-record only
+through the legitimacy gate.
+
 - **Citation embedding — A: cite-by-`id` into a `_data/sources/` collection.** Single
   source of truth for provenance; the tool stays out of authored prose (writes only
   its own `_data/sources/` namespace). Rendered by a **plugin-free include**

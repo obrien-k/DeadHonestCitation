@@ -1,6 +1,8 @@
 venv/
 __pycache__/
 output/
+# Hand-fetched captures fed to `dhc convert --archived-from` — third-party pages, never commit
+sources/
 urls.txt
 .env
 .DS_Store

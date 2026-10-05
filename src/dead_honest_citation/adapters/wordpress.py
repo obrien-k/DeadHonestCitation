@@ -15,6 +15,21 @@ from .base import PlatformAdapter, Selector, as_tag, attr_str, class_list
 # Organizational-only categories that add no editorial value.
 CATEGORY_NOISE = {"uncategorized", "in-response"}
 
+# Theme provenance: which publisher's theme each publisher-specific gate below
+# exists for, and the capture that proves it. A theme is a fact about a capture,
+# not the publication date: a page can be re-skinned (or migrated into WordPress)
+# years after it ran, so cite the snapshot, never "the publisher used X in <year>".
+#
+# - Chicago Magazine (chicagomag.com): child theme "ChicagoMagazine" on
+#   GeneratePress (<body class="wp-theme-generatepress
+#   wp-child-theme-ChicagoMagazine">). Gates: .article-body (content),
+#   .art-timestamp (date; article:published_time is emitted empty), and the
+#   .art-head/.art-deck/.art-byline header kept out of the body. Evidence:
+#   Wayback capture 20260111154755 of /Chicago-Magazine/February-2008/
+#   Long-Times-Coming/ (published 2008-01-24). Says nothing about what CMS or
+#   theme served that article in 2008: its assets sit under
+#   /wp-content/archive/..., which suggests a later migration (unverified).
+
 
 class WordPressAdapter(PlatformAdapter):
     """WordPress exports, resilient to theme differences in markup."""
@@ -22,12 +37,14 @@ class WordPressAdapter(PlatformAdapter):
     name: ClassVar[str] = "wordpress"
     # WP themes disagree on the body wrapper — try the common ones in order.
     # yaaburnee uses .post-content; later/generic themes use .entry-content;
-    # td-/article-content cover a few more. The pipeline falls back to <article>.
+    # td-/article-content cover a few more, and article-body is Chicago Magazine's
+    # GeneratePress child theme. The pipeline falls back to <article>.
     content: ClassVar[Selector | list[Selector]] = [
         ("div", {"class": "post-content"}),
         ("div", {"class": "entry-content"}),
         ("div", {"class": "td-post-content"}),
         ("div", {"class": "article-content"}),
+        ("div", {"class": "article-body"}),
     ]
 
     def detect(self, soup: BeautifulSoup) -> bool:
@@ -53,8 +70,9 @@ class WordPressAdapter(PlatformAdapter):
         .entry-title → og:title → h1; date from <meta article:published_time> →
         <time datetime> → .post-date/.entry-date text; tags from the yaaburnee
         tag-* classes on <article>; categories from the .entry-meta
-        post-category badge. Description is left empty (WP themes rarely emit a
-        per-post one) and derived from the first body paragraph in the pipeline.
+        post-category badge. Description from og:description → meta description
+        when the theme emits one, else left empty and derived from the first body
+        paragraph in the pipeline.
         """
         # Title: .entry-title → og:title → first h1
         title = ""
@@ -90,8 +108,21 @@ class WordPressAdapter(PlatformAdapter):
                 if a.get_text(strip=True) and slugify(a.get_text(strip=True)) not in CATEGORY_NOISE
             ]
 
+        # Description: og:description → meta description. Many themes emit none,
+        # but when one exists it beats the first paragraph (drop caps split it).
+        description = ""
+        for m in (
+            as_tag(soup.find("meta", property="og:description")),
+            as_tag(soup.find("meta", {"name": "description"})),
+        ):
+            if attr_str(m, "content"):
+                description = attr_str(m, "content").strip()
+                break
+
         # The theme has no per-post cover; body images are kept inline instead.
-        return PostMetadata(title=title, date=date, tags=tags, categories=categories)
+        return PostMetadata(
+            title=title, date=date, description=description, tags=tags, categories=categories
+        )
 
     def clean(self, article: Tag) -> Tag:
         """Cleaning pipeline for yaaburnee WordPress article bodies."""
@@ -116,7 +147,9 @@ def _first_parsable_date(soup: BeautifulSoup, name_meta_fallback: bool = True) -
         meta_pub = as_tag(soup.find("meta", {"name": "published_time"}))
     if attr_str(meta_pub, "content"):
         candidates.append(attr_str(meta_pub, "content"))
-    for cls in ("post-date", "entry-date", "published", "posted-on"):
+    # art-timestamp: Chicago Magazine ("January 24, 2008, 4:40 pm"), whose
+    # article:published_time meta is emitted empty.
+    for cls in ("post-date", "entry-date", "published", "posted-on", "art-timestamp"):
         el = as_tag(soup.find(class_=cls))
         if el:
             candidates.append(attr_str(el, "datetime") or el.get_text(" ", strip=True))

@@ -107,6 +107,23 @@ def test_wordpress_clean_removes_cruft(fixture_soup: Callable[[str], BeautifulSo
     assert "Plain text survives" in text
 
 
+def test_wordpress_art_body_theme(fixture_soup: Callable[[str], BeautifulSoup]) -> None:
+    # GeneratePress child theme (Chicago Magazine): body in .article-body, date only
+    # in .art-timestamp text because article:published_time is emitted empty.
+    soup = fixture_soup("wp-artbody.html")
+    assert detect_platform(soup) == "wordpress"
+    meta = PLATFORMS["wordpress"].extract_metadata(soup)
+    assert meta.title == "Signal Over Noise"
+    assert meta.date == dt.date(2009, 3, 3)
+    assert meta.description == "A short interview about keeping old broadcasts alive."
+    selectors = PLATFORMS["wordpress"].content
+    assert isinstance(selectors, list)
+    body = next(soup.find(n, a) for n, a in selectors if soup.find(n, a))
+    text = body.get_text(" ", strip=True)
+    assert "The station went dark" in text
+    assert "By A. Writer" not in text  # header block stays out of the body
+
+
 # --- ProBoards: OP-only render, author/date attribution, footer stripped ----
 
 

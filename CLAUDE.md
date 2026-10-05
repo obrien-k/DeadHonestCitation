@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Setup — the package installs a single CLI entry point, `dhc`
 python -m venv venv
 source venv/bin/activate
-pip install -e ".[dev]"        # dev extra: pytest, responses, mypy, ruff
+pip install -e ".[dev]"        # dev extra: pytest, responses, playwright, mypy, ruff
+playwright install chromium    # browser for screen capture + the `browser`-marked tests
 # optional extras: .[docx] (mammoth), .[screenshot] (playwright + `playwright install chromium`)
 
 # Convert (default: reads urls.txt, auto-detects the source platform per URL)
@@ -40,7 +41,8 @@ dhc convert old.txt --txt                # treat .txt as content, not a list fil
 # Output format/layout (default jekyll). data = provenance-stamped citation objects
 dhc convert urls.txt --target commonmark # aliases: cm, plain, md
 dhc convert urls.txt --target data       # → _data/sources/<id>.yml + _sources/<id>.md
-dhc convert urls.txt --target data --screenshot  # render each page (needs playwright)
+dhc convert urls.txt --target data --screenshot  # render archived/local pages (needs playwright)
+# A live URL gets a photo-record automatically — only if it passes the legitimacy gate (ADR-0001)
 
 # Threads (forums, Hacker News): original post only by default; --full-thread keeps every post
 dhc convert thread-url --full-thread
@@ -48,6 +50,10 @@ dhc convert "https://news.ycombinator.com/item?id=47048633" -hn   # --hacker-new
 
 # Editorial note recorded on each citation (--target data) — what the capture can't show
 dhc convert <url> --target data --note "5 months later the site is down, fortunately archive.org-ed"
+
+# A hand-fetched Wayback capture (one local file): cite it as archived, not local;
+# relative image srcs are fetched from the same snapshot's im_ capture
+dhc convert saved.html --target data --archived-from "https://web.archive.org/web/<ts>/<url>"
 
 # Discover URLs without knowing them: enumerate / recover / save
 dhc discover domain example.com --contains foo   # enumerate a domain's captures
@@ -76,8 +82,10 @@ ruff check .
 ruff format .
 mypy          # strict; covers src/
 
-# Tests — offline, mocked HTTP (responses), no network; runs in well under a second
+# Tests — no internet: mocked HTTP (responses) + a local HTTP server fixture (`live_site`);
+# `browser`-marked tests drive real Chromium via Playwright and skip without it
 pytest
+pytest -m "not browser"   # the sub-second loop
 ```
 
 The old script entry points (`python index.py`, `discover.py`, `to_jekyll.py`, `wizard.py`)
@@ -112,6 +120,9 @@ Package layout (each module's role):
 - `core/sources.py` — the input layer: `collect_sources()`, `load_source()`, extension
   classification (`SOURCE_EXTS`, `MD_EXTS`).
 - `core/capture.py` — the capture tier: `is_markup()`, `capture_binary()`.
+- `core/legitimacy.py` — the live-copy gate (ADR-0001): `assess_live()` judges a fetched live
+  page (status, bounded same-host redirects, soft 404, parked domain, recognized CMS); only a
+  page that passes gets the automatic `<slug>-live.png` photo-record on its citation.
 - `core/runlog.py` — the append-only `runlog.jsonl` writer (`log_run()` takes an `Outcome`).
 - `core/housekeeping.py` — `clean_output()`, `prune_output()`.
 - `models.py` — the shared dataclasses: `PostMetadata`, `Citation`, `Outcome`.
@@ -141,7 +152,7 @@ Package layout (each module's role):
 - `network/wayback.py` — Wayback URL math (`WAYBACK_RE`, `unwrap_wayback()`,
   `wayback_image_candidates()`, `wayback_raw()`) and discovery (CDX enumerate,
   host recovery, Save Page Now).
-- `network/screenshot.py` — lazy/optional playwright page rendering.
+- `network/screenshot.py` — lazy/optional playwright page rendering (URLs or local paths).
 - `staging.py` — stage/promote posts into a Jekyll repo (`stage_one()`, `promote_one()`,
   tag injection, asset copying).
 - `cli/` — the Typer app: `convert.py` (+ clean/prune), `discover.py` (sub-app),
@@ -158,10 +169,15 @@ Package layout (each module's role):
 The Ghost adapter reads Open Graph/meta tags. The WordPress extraction is
 **generalized across WP themes**: each field resolves from the first source that works —
 title `.entry-title` → `og:title` → `h1`; date `<meta article:published_time>` →
-`<time datetime>` → `.post-date`/`.entry-date` text; tags from yaaburnee `tag-*` classes;
-categories from `.entry-meta span.post-category`. Likewise the WordPress `content`
-selector is a list (`.post-content`, then `.entry-content`, `.td-post-content`,
-`.article-content`) because themes disagree on the body wrapper.
+`.post-date`/`.entry-date`/`.art-timestamp` text → `<time datetime>`; description
+`og:description` → `meta description` (else derived from the first paragraph); tags from
+yaaburnee `tag-*` classes; categories from `.entry-meta span.post-category`. Likewise the
+WordPress `content` selector is a list (`.post-content`, then `.entry-content`,
+`.td-post-content`, `.article-content`, `.article-body`) because themes disagree on the
+body wrapper. Publisher-specific gates (e.g. Chicago Magazine's `ChicagoMagazine`
+GeneratePress child theme → `.article-body`/`.art-timestamp`) are recorded with the
+capture that evidences them in the **theme provenance** note at the top of
+`adapters/wordpress.py`; a theme is a fact about a capture, not about the publication date.
 
 **Embeds / plugins** — `transform.embeds.convert_embeds()` runs before markdownify (which
 silently drops `<iframe>`/`<embed>`/`<object>`). YouTube/Vimeo become labeled Markdown
@@ -207,7 +223,8 @@ pipeline's cover/screenshot handling). The conversion core produces
 (`emit_citation`) writes a **citation object** per source — `_data/sources/<id>.yml` +
 `_sources/<id>.md` + a shipped plugin-free `_includes/cite.html` — with **honest
 provenance** (`derive_citation`): `archived` (Wayback permalink + snapshot date), `live`
-(URL + access date), or `local` (a saved file — never a fabricated link).
+(URL + access date), or `local` (a saved file — never a fabricated link). Decisions are
+logged as ADRs in `docs/adr/`.
 
 **Capture tier** — `process_url()` inspects `Content-Type` up front; a non-markup URL
 (PDF/image/zip/…) is preserved by `capture_binary()` (saves the bytes as an asset +

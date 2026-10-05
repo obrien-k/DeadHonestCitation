@@ -26,6 +26,7 @@ screenshot = ["playwright>=1.45"]
 dev = [
     "pytest>=8.0",
     "responses>=0.25",
+    "playwright>=1.45",  # screen-capture tests (also needs `playwright install chromium`)
     "mypy>=1.10",
     "ruff>=0.5",
     "types-requests",
@@ -57,6 +58,9 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "browser: drives a real Chromium via Playwright (skipped when it isn't installed)",
+]
 
 [tool.mypy]
 python_version = "3.11"

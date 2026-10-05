@@ -9,7 +9,7 @@ from bs4 import Tag
 
 from ..config import OUTPUT_DIR
 from ..network.polite import polite_get
-from ..network.wayback import wayback_image_candidates
+from ..network.wayback import wayback_image_candidates, wayback_resolve
 from ..ui import warn
 
 if TYPE_CHECKING:
@@ -55,7 +55,11 @@ def download_cover(cover_url: str, slug: str, target: "OutputTarget | None" = No
 
 
 def download_images(
-    soup: Tag, slug: str, base_dir: str | None = None, target: "OutputTarget | None" = None
+    soup: Tag,
+    slug: str,
+    base_dir: str | None = None,
+    target: "OutputTarget | None" = None,
+    archived_from: str | None = None,
 ) -> Tag:
     """Localize all images in the article and rewrite their srcs.
 
@@ -69,6 +73,8 @@ def download_images(
             relative path are copied straight out of its sibling
             "<name>_files/" folder instead of being fetched over the network.
         target: The active output target (defaults to jekyll).
+        archived_from: Wayback permalink a local copy was saved from; relative
+            srcs missing from the files-dir are fetched from that snapshot.
     """
     target = target or _default_target()
     post_img_dir = os.path.join(OUTPUT_DIR, target.asset_dir(slug))
@@ -92,7 +98,12 @@ def download_images(
         # 2. Download from the best real URL(s) available on the tag — the inline
         # src, then srcset entries (largest first), then common data-* fallbacks.
         localized = False
-        for candidate in image_source_urls(img):
+        candidates = image_source_urls(img)
+        if archived_from and not src.startswith(("http://", "https://", "//", "/web/")):
+            resolved = wayback_resolve(src, archived_from)
+            if resolved:
+                candidates.insert(0, resolved)
+        for candidate in candidates:
             for url in wayback_image_candidates(candidate):
                 local_path = download_image(url, post_img_dir)
                 if local_path:

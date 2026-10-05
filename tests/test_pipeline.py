@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import responses
 
 from dead_honest_citation.core.pipeline import process_markdown, process_url
 
@@ -221,3 +222,39 @@ def test_unknown_forced_platform_is_an_outcome_not_a_crash(
 
     assert outcome.status == "failed"
     assert outcome.reason == "platform not detected"
+
+
+def test_local_copy_of_snapshot_cites_the_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # --archived-from: a locally saved copy of a Wayback capture is cited as that
+    # capture (archived, permalink + date), never as the local filename, and its
+    # root-relative image is fetched from the same snapshot.
+    src = tmp_path / "src" / "saved.html"
+    src.parent.mkdir()
+    shutil.copy(FIXTURES_DIR / "wp-artbody.html", src)
+    monkeypatch.chdir(tmp_path)
+    permalink = (
+        "https://web.archive.org/web/20260111154755/"
+        "https://www.example.com/Example-Magazine/March-2009/Signal-Over-Noise/"
+    )
+    img_url = (
+        "https://web.archive.org/web/20260111154755im_/"
+        "https://www.example.com/wp-content/archive/images/2009/March%202009/tower.jpg"
+    )
+
+    with responses.RequestsMock() as rsps:
+        rsps.get(img_url, body=b"\xff\xd8jpeg", content_type="image/jpeg")
+        outcome = process_url(str(src), target="data", archived_from=permalink)
+
+    assert outcome.status == "converted"
+    yml = (tmp_path / "output" / "_data/sources/signal-over-noise.yml").read_text("utf-8")
+    assert "provenance: archived" in yml
+    assert f'archive_url: "{permalink}"' in yml
+    assert "captured_at: 2026-01-11" in yml
+    assert 'source_url: "https://www.example.com/Example-Magazine/March-2009/' in yml
+    assert "saved.html" not in yml
+    assert (tmp_path / "output/assets/img/sources/signal-over-noise/tower.jpg").exists()
+    body = (tmp_path / "output" / "_sources/signal-over-noise.md").read_text("utf-8")
+    assert "/assets/img/sources/signal-over-noise/tower.jpg" in body
+    assert "By A. Writer" not in body

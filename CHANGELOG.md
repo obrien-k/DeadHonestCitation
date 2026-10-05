@@ -6,6 +6,38 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Live-copy legitimacy gate + photo-record (ADR-0001).** A live URL converted to a
+  citation target is judged by `core/legitimacy.assess_live()` on the response already
+  fetched: no 4xx/5xx, at most 3 same-host redirects that don't end on the homepage, not
+  a soft 404, not a parked domain, and a CMS `detect_platform()` recognizes. A page that
+  passes gets an automatic Playwright capture (`<slug>-live.png`) on its citation, with a
+  `Live capture <date>: …` note; one that fails gets none (even with `--screenshot`), and
+  the reason is printed. Archived and local sources are unchanged. ADRs now live in
+  `docs/adr/`.
+- **Playwright in the test suite.** `playwright` joins the `dev` extra; a session-scoped
+  local HTTP server fixture (`live_site`) serves real redirects, 404s, soft 404s, and
+  parked pages; `browser`-marked tests drive real Chromium (full-page and cropped
+  captures, the photo-record end to end) and skip when playwright or Chromium is missing.
+- **`--archived-from <wayback-permalink>`** on `dhc convert`, for a single local
+  file that is a hand-fetched copy of a Wayback capture (for example, when
+  `web.archive.org` can't be reached from where `dhc` runs). The citation is
+  stamped `archived` with that permalink and its snapshot date instead of
+  `local` + the filename, and relative image srcs missing from the files-dir are
+  fetched from the same snapshot's `im_` capture (`wayback_resolve()`).
+
+### Fixed
+- **`--screenshot` on a local saved page** passed a bare filesystem path to Playwright,
+  which rejected it ("Cannot navigate to invalid URL"); local paths are now rendered via
+  a `file://` URI. Also types the crop rect as Playwright's `FloatRect`.
+- **WordPress: GeneratePress `art-*` child themes (Chicago Magazine).** The body
+  is located via `.article-body` (the header block — title/deck/byline/date — no
+  longer leaks into it), and the date falls back to `.art-timestamp` text when
+  `article:published_time` is emitted empty.
+- **WordPress description** now reads `og:description` → `meta description` (as
+  the generic adapter does) before deriving one from the first paragraph, which a
+  drop-cap `<span>` splits ("A fter…").
+
 ## [0.4.0] - 2026-07-26
 
 ### Added
