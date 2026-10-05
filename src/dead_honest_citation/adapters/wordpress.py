@@ -15,6 +15,21 @@ from .base import PlatformAdapter, Selector, as_tag, attr_str, class_list
 # Organizational-only categories that add no editorial value.
 CATEGORY_NOISE = {"uncategorized", "in-response"}
 
+# Theme provenance: which publisher's theme each publisher-specific gate below
+# exists for, and the capture that proves it. A theme is a fact about a capture,
+# not the publication date: a page can be re-skinned (or migrated into WordPress)
+# years after it ran, so cite the snapshot, never "the publisher used X in <year>".
+#
+# - Chicago Magazine (chicagomag.com): child theme "ChicagoMagazine" on
+#   GeneratePress (<body class="wp-theme-generatepress
+#   wp-child-theme-ChicagoMagazine">). Gates: .article-body (content),
+#   .art-timestamp (date; article:published_time is emitted empty), and the
+#   .art-head/.art-deck/.art-byline header kept out of the body. Evidence:
+#   Wayback capture 20260111154755 of /Chicago-Magazine/February-2008/
+#   Long-Times-Coming/ (published 2008-01-24). Says nothing about what CMS or
+#   theme served that article in 2008: its assets sit under
+#   /wp-content/archive/..., which suggests a later migration (unverified).
+
 
 class WordPressAdapter(PlatformAdapter):
     """WordPress exports, resilient to theme differences in markup."""

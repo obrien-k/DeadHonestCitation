@@ -162,10 +162,15 @@ Package layout (each module's role):
 The Ghost adapter reads Open Graph/meta tags. The WordPress extraction is
 **generalized across WP themes**: each field resolves from the first source that works —
 title `.entry-title` → `og:title` → `h1`; date `<meta article:published_time>` →
-`<time datetime>` → `.post-date`/`.entry-date` text; tags from yaaburnee `tag-*` classes;
-categories from `.entry-meta span.post-category`. Likewise the WordPress `content`
-selector is a list (`.post-content`, then `.entry-content`, `.td-post-content`,
-`.article-content`) because themes disagree on the body wrapper.
+`.post-date`/`.entry-date`/`.art-timestamp` text → `<time datetime>`; description
+`og:description` → `meta description` (else derived from the first paragraph); tags from
+yaaburnee `tag-*` classes; categories from `.entry-meta span.post-category`. Likewise the
+WordPress `content` selector is a list (`.post-content`, then `.entry-content`,
+`.td-post-content`, `.article-content`, `.article-body`) because themes disagree on the
+body wrapper. Publisher-specific gates (e.g. Chicago Magazine's `ChicagoMagazine`
+GeneratePress child theme → `.article-body`/`.art-timestamp`) are recorded with the
+capture that evidences them in the **theme provenance** note at the top of
+`adapters/wordpress.py`; a theme is a fact about a capture, not about the publication date.
 
 **Embeds / plugins** — `transform.embeds.convert_embeds()` runs before markdownify (which
 silently drops `<iframe>`/`<embed>`/`<object>`). YouTube/Vimeo become labeled Markdown
